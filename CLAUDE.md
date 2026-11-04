@@ -128,3 +128,5 @@ npm run demo                               # 見た目の確認: サンプルと
 - `src/` に外部依存を追加しない。どうしても必要なら理由を README に書く
 - 新機能は `test/cube-glb.js` にケースを足すか `test/fixtures/` のサンプルで検証し、`validate.py` で error 0 を保つ
 - 変換で捨てた情報（未対応拡張など）は `console.warn` ではなく `options.onWarning?.(msg)` 経由で通知する（未実装、段階 2 で追加）
+- OpenUSD のコードを移植・翻訳した場合は、そのファイルに Pixar の著作権表示を残し、リポジトリに `THIRD_PARTY_NOTICES.md` を追加する
+- 「OpenUSD」「Pixar」を名乗らない・公式と誤認させない
