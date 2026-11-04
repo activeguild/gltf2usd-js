@@ -147,7 +147,7 @@ export function runChecks(entries, layer) {
         shaderProblems++;
       }
     }
-    if (id === "UsdPrimvarReader_float2") {
+    if (id === "UsdPrimvarReader_float2" || id === "UsdPrimvarReader_float") {
       const v = prim.props.get("inputs:varname");
       if (v && v.type !== "string") {
         error(`${prim.path}: inputs:varname の型が ${v.type}（string であるべき）`);
@@ -199,9 +199,11 @@ function checkMesh(prim, prims) {
     if (!target || target.type !== "Material") err(`material:binding の参照先が Material ではない (${binding.value?.[0]})`);
     // Every UV set the material reads must exist on the mesh.
     for (const shader of target?.children ?? []) {
-      if (shader.props.get("info:id")?.value !== "UsdPrimvarReader_float2") continue;
+      const readerId = shader.props.get("info:id")?.value;
+      if (readerId !== "UsdPrimvarReader_float2" && readerId !== "UsdPrimvarReader_float") continue;
       const varname = shader.props.get("inputs:varname")?.value;
-      if (varname && !prim.props.has(`primvars:${varname}`)) {
+      // A reader with a fallback (displayOpacity) is meant for meshes with and without the primvar.
+      if (varname && !prim.props.has(`primvars:${varname}`) && !shader.props.has("inputs:fallback")) {
         warn(`マテリアルが読む primvars:${varname} がこの Mesh にない (${shader.path})`);
       }
     }

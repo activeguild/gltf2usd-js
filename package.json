@@ -8,7 +8,7 @@
     "glb2usd": "./cli.js"
   },
   "scripts": {
-    "test": "node test/make-glb.js && node test/run.js && node test/validation.js && node test/accessor.js",
+    "test": "node test/make-glb.js && node test/run.js && node test/validation.js && node test/accessor.js && node test/color.js",
     "demo": "node demo/server.js"
   },
   "license": "MIT"

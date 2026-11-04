@@ -1,6 +1,6 @@
 // Builds a three.js scene from a parsed USDA layer (see usda-parser.js) and the
 // files of its USDZ package. Covers what gltf2usd.js writes: Xform hierarchy,
-// xformOps, Mesh (normals / st / displayColor with any interpolation),
+// xformOps, Mesh (normals / st / displayColor with any interpolation; displayOpacity read by a material),
 // UsdPreviewSurface with UsdUVTexture inputs, and UsdSkel (Skeleton +
 // SkelAnimation joints, BlendShapes and their weights). Anything else is reported in
 // `warnings` so it is obvious when the preview, not the converter, is the limit.
@@ -202,7 +202,21 @@ export function buildUsdScene(layer, entries, options = {}) {
     const dc = prim.props.get("primvars:displayColor");
     if (dc?.value) geom.setAttribute("color", expandPrimvar(prim, dc, 3, corners, vertexOf, "constant"));
 
-    const material = buildBoundMaterial(prim, !!dc?.value);
+    let material = buildBoundMaterial(prim, !!dc?.value);
+    // A material whose opacity reads a primvar (displayOpacity): per-vertex alpha.
+    // USD's material ignores displayColor, so the RGB of the vertex color is white.
+    const opacityPrimvar = material.userData.opacityPrimvar;
+    const op = opacityPrimvar && prim.props.get(`primvars:${opacityPrimvar}`);
+    if (op?.value) {
+      const scalar = { ...op, value: op.value.map((v) => [v]) }; // float[] values are plain numbers
+      const a = expandPrimvar(prim, scalar, 1, corners, vertexOf, "constant").array;
+      const rgba = new Float32Array(a.length * 4).fill(1);
+      for (let i = 0; i < a.length; i++) rgba[i * 4 + 3] = a[i];
+      geom.setAttribute("color", new THREE.BufferAttribute(rgba, 4));
+      material = material.clone();
+      material.vertexColors = true;
+      material.opacity = 1; // the fallback applies only to meshes without the primvar
+    }
     if (get("doubleSided")) material.side = THREE.DoubleSide;
     if (prim.props.has("skel:skeleton")) return bindSkel(prim, geom, material, corners, vertexOf, points.length);
     const mesh = new THREE.Mesh(geom, material);
@@ -443,9 +457,10 @@ export function buildUsdScene(layer, entries, options = {}) {
     } else if (typeof opacity?.value === "number") {
       mat.opacity = opacity.value;
     }
+    if (opacity?.primvar) mat.userData.opacityPrimvar = opacity.primvar;
     if (threshold > 0) {
       mat.alphaTest = threshold;
-    } else if (opacity && (opacity.texture || mat.opacity < 1)) {
+    } else if (opacity && (opacity.texture || opacity.primvar || mat.opacity < 1)) {
       mat.transparent = true;
       mat.depthWrite = false;
     }
@@ -532,6 +547,10 @@ export function buildUsdScene(layer, entries, options = {}) {
     const src = prims.get(path);
     if (!src) { warn(`接続先がない: ${prop.connect[0]}`); return null; }
     const srcId = src.props.get("info:id")?.value;
+    if (srcId === "UsdPrimvarReader_float") {
+      // Vertex opacity (primvars:displayOpacity); meshes without it use the fallback.
+      return { primvar: src.props.get("inputs:varname")?.value, value: src.props.get("inputs:fallback")?.value ?? 0 };
+    }
     if (srcId !== "UsdUVTexture") {
       warn(`${name} が ${srcId ?? src.type} に接続されている（UsdUVTexture 以外は未対応）`);
       return null;
