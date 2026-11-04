@@ -343,6 +343,12 @@ npm run demo                               # 見た目の確認: サンプルと
   `README.md`・`README.ja.md`・`LICENSE` だけ（test / demo / CLAUDE.md は含めない）。`exports` は `.` と `./package.json` のみ。
   bin は `glb2usd`（1 つだけなので `npx gltf2usd-js in.glb out.usdz` でも動く）。`prepublishOnly` で `npm test`。Node は 18 以上。
 - 公開前の確認: `npm pack --dry-run` で中身を見て、tarball を空のプロジェクトに入れて `import "gltf2usd-js"` と `npx glb2usd` を試す。
+- **公開は GitHub Actions（`.github/workflows/publish.yml`）。** `v<semver>` のタグを push すると、タグのバージョンを
+  `npm version --no-git-tag-version` で package.json に入れ、`npm test`・`usd-core==26.11` で結合テスト（OpenUSD 検証込み）・
+  `npm pack --dry-run` のあと `npm publish --provenance --access public` する。プレリリース（`-` を含む）は dist-tag `next`、それ以外は `latest`。
+  同じバージョンが npm にあれば止める。シークレット `NPM_TOKEN`（npm の automation トークン）が必要。リポジトリの package.json の
+  version はタグに合わせて手で上げてもよいが、公開されるのはタグのバージョン。
+- TypeScript の型定義はまだない（issue #9）。
 - **README は英語（`README.md`）が既定、日本語は `README.ja.md`。** 先頭の言語リンクで切り替える。内容を変えたら両方を同じように直す。
   README は外部の利用者向け（インストール・使い方・API・対応機能・制限・ビューア・検証・デモ・開発）。設計の経緯はこの CLAUDE.md に書く。
 

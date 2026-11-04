@@ -1,0 +1,81 @@
+# Publish to npm when a version tag is pushed: git tag v1.2.3 && git push origin v1.2.3
+#
+# The version comes from the tag (v1.2.3 → 1.2.3), so package.json does not have to be
+# bumped first. A prerelease tag (v1.2.3-beta.1) is published under the npm dist-tag
+# "next" instead of "latest". Nothing is published unless the unit tests, the Khronos
+# integration test and the OpenUSD validators pass.
+#
+# Setup (once): add an npm automation token as the repository secret NPM_TOKEN
+# (Settings → Secrets and variables → Actions).
+name: Publish to npm
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  id-token: write # npm provenance (links the package to this workflow run)
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Version from the tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'; then
+            echo "::error::Tag $GITHUB_REF_NAME is not v<semver> (e.g. v1.2.3 or v1.2.3-beta.1)"
+            exit 1
+          fi
+          case "$VERSION" in
+            *-*) DIST_TAG=next ;;
+            *) DIST_TAG=latest ;;
+          esac
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "dist-tag=$DIST_TAG" >> "$GITHUB_OUTPUT"
+          echo "Publishing $VERSION with dist-tag $DIST_TAG"
+
+      - name: Set package.json version
+        run: npm version "${{ steps.version.outputs.version }}" --no-git-tag-version --allow-same-version
+
+      - name: Refuse a version that is already on npm
+        run: |
+          if npm view "gltf2usd-js@${{ steps.version.outputs.version }}" version >/dev/null 2>&1; then
+            echo "::error::gltf2usd-js@${{ steps.version.outputs.version }} is already published"
+            exit 1
+          fi
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Install the OpenUSD validators
+        run: pip install usd-core==26.11 # the version the outputs were validated with
+
+      - name: Integration test (Khronos samples + OpenUSD validators)
+        run: npm run test:integration
+
+      - name: Package contents
+        run: npm pack --dry-run
+
+      - name: Publish
+        run: npm publish --provenance --access public --tag "${{ steps.version.outputs.dist-tag }}"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

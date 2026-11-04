@@ -224,6 +224,17 @@ pip install usd-core            # 任意。結合テストと test/validate.py �
 python3 test/validate.py model.usdz
 ```
 
+### リリース
+
+バージョンのタグを push すると、GitHub Actions がそのバージョンで npm に公開します（`.github/workflows/publish.yml`）。
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+バージョンはタグから取るので、先に `package.json` を書き換える必要はありません。`v0.2.0-beta.1` のようなプレリリースのタグは、npm の dist-tag `next` で公開します。単体テスト・結合テスト・OpenUSD のバリデータが通らないとき、そのバージョンがすでに npm にあるときは公開しません。リポジトリのシークレット `NPM_TOKEN` に npm の automation トークンが必要です。公開は provenance 付きです。
+
 設計メモと、出力の構成をこうした理由は [CLAUDE.md](CLAUDE.md) にあります。
 
 ## ライセンス

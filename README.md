@@ -224,6 +224,17 @@ pip install usd-core            # optional: lets the integration test and test/v
 python3 test/validate.py model.usdz
 ```
 
+### Releasing
+
+Push a version tag and GitHub Actions publishes that version to npm (`.github/workflows/publish.yml`):
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+The version comes from the tag, so `package.json` does not have to be bumped first. A prerelease tag such as `v0.2.0-beta.1` is published under the npm dist-tag `next`. Nothing is published unless the unit tests, the integration test and the OpenUSD validators pass, or if that version is already on npm. The workflow needs an npm automation token in the repository secret `NPM_TOKEN`, and it publishes with provenance.
+
 Design notes and the reasons behind the output layout are in [CLAUDE.md](CLAUDE.md) (in Japanese).
 
 ## License
