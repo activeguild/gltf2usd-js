@@ -117,20 +117,10 @@ npm run demo                               # 見た目の確認: サンプルと
 - [ ] モーフ: `BlendShape` prim（offsets / normalOffsets）+ `skel:blendShapes` + `SkelAnimation.blendShapeWeights`
 
 ### 段階 5: USDC (Crate) 出力
-- OpenUSD `pxr/usd/usd/crateFile.cpp` / `crateData.cpp` が唯一の一次資料。独立実装にすること（下記ライセンス参照）
+- OpenUSD `pxr/usd/usd/crateFile.cpp` / `crateData.cpp` が唯一の一次資料
 - 最低限: Bootstrap ヘッダ、TOC、`TOKENS` / `STRINGS` / `FIELDS` / `FIELDSETS` / `PATHS` / `SPECS` セクション、
   インライン値 vs 参照値、配列の圧縮（整数配列は LZ4 + 差分圧縮。LZ4 も自前で書く必要あり）
 - まず usda と同じ内容を usdc で出して `usdcat` で round-trip 比較する
-
-## ライセンスについて
-
-- OpenUSD は **TOST 1.0**（Apache 2.0 の Section 6「商標」だけが異なる派生ライセンス）。
-- **仕様を参照して独立に実装する分には義務なし。** ファイル形式、スキーマ名、属性名は著作物ではない。
-- **OpenUSD のコードを移植・翻訳した場合**は派生物になるので、そのファイルに Pixar の著作権表示と
-  TOST ライセンスへの言及を残し、リポジトリに `THIRD_PARTY_NOTICES.md` を追加する。
-  Crate 実装でそうなりやすいので、書く前にどの関数を参考にしたかコメントで残すこと。
-- 「OpenUSD」「Pixar」を名乗らない・公式と誤認させない（商標条項）。`usd` を名前に含むのは問題ない。
-- 本プロジェクト自体は MIT。
 
 ## コーディング規約
 
