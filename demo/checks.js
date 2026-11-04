@@ -133,6 +133,14 @@ function checkMesh(prim, prims) {
   if (binding) {
     const target = prims.get(binding.value?.[0]);
     if (!target || target.type !== "Material") err(`material:binding の参照先が Material ではない (${binding.value?.[0]})`);
+    // Every UV set the material reads must exist on the mesh.
+    for (const shader of target?.children ?? []) {
+      if (shader.props.get("info:id")?.value !== "UsdPrimvarReader_float2") continue;
+      const varname = shader.props.get("inputs:varname")?.value;
+      if (varname && !prim.props.has(`primvars:${varname}`)) {
+        warn(`マテリアルが読む primvars:${varname} がこの Mesh にない (${shader.path})`);
+      }
+    }
     const api = prim.metadata["prepend apiSchemas"] ?? prim.metadata.apiSchemas ?? [];
     if (!api.includes("MaterialBindingAPI")) err("material:binding があるのに MaterialBindingAPI が適用されていない");
   }

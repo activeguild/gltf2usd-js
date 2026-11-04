@@ -223,6 +223,7 @@ function showGltf(glb) {
   return new Promise((resolve) => {
     const buf = glb.buffer.slice(glb.byteOffset, glb.byteOffset + glb.byteLength);
     new GLTFLoader().parse(buf, "", (gltf) => {
+      fixTextureTransforms(gltf.scene);
       setContent(views[0], gltf.scene);
       overlay("gltf", null);
       resolve();
@@ -231,6 +232,29 @@ function showGltf(glb) {
       overlay("gltf", `GLTFLoader で読み込めませんでした: ${err.message ?? err}`, true);
       resolve();
     });
+  });
+}
+
+/**
+ * three.js' GLTFLoader maps KHR_texture_transform onto Texture.offset / repeat /
+ * rotation, which three composes as uv' = S · R · uv + offset. The glTF spec is
+ * uv' = T · R · S · uv, so the two differ when scale is non-uniform and rotation
+ * is non-zero. Rebuild the matrix per spec so the reference view is correct.
+ */
+function fixTextureTransforms(root) {
+  const seen = new Set();
+  root.traverse((o) => {
+    for (const m of [o.material].flat()) {
+      if (!m) continue;
+      for (const tex of Object.values(m)) {
+        if (!tex?.isTexture || seen.has(tex) || tex.rotation === 0) continue;
+        seen.add(tex);
+        const c = Math.cos(tex.rotation), s = Math.sin(tex.rotation);
+        const [sx, sy] = [tex.repeat.x, tex.repeat.y];
+        tex.matrixAutoUpdate = false;
+        tex.matrix.set(c * sx, s * sy, tex.offset.x, -s * sx, c * sy, tex.offset.y, 0, 0, 1);
+      }
+    }
   });
 }
 

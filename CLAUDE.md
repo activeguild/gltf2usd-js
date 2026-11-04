@@ -35,8 +35,10 @@ OpenUSD 26.11 の全 30 バリデータに通して error 0 を確認済み。
 - `usdz-reader.js`: zip の central directory を読む
 - `server.js`: 依存ゼロの静的サーバ
 - three.js（0.170.0）は import map で jsDelivr から読む。デモにだけ許される依存で、`src/` には入れない
+- **GLTFLoader の KHR_texture_transform は仕様とずれる**（S·R の順で合成するため、非一様 scale + rotation で崩れる）。
+  `app.js` の `fixTextureTransforms()` で仕様どおりの行列に直してから左側に表示している
 - **新しい USD 機能を出力したら、`usd-preview.js` / `checks.js` もそれを読めるように更新する**（例: 段階 3 の timeSamples、
-  段階 2 の `UsdTransform2d` や `primvars:st1` は一部対応済み・警告表示）
+  `UsdTransform2d` と `primvars:st1..3` は対応済み）
 
 ### 対応済み
 - GLB ヘッダ / JSON / BIN チャンク、`data:` URI のバッファと画像
@@ -47,12 +49,14 @@ OpenUSD 26.11 の全 30 バリデータに通して error 0 を確認済み。
 - マテリアル: baseColor factor/texture、metallicRoughness、normal、occlusion、emissive、alphaMode BLEND/MASK
 - テクスチャ（PNG / JPEG）の USDZ 同梱（`textures/<name>.<ext>`、同名は `<name>_1.<ext>`）
 - sampler の wrapS / wrapT
+- TEXCOORD_n → `primvars:st` / `st1` / `st2` …、テクスチャの `texCoord` ごとに `uvReader_st<n>`
+- KHR_texture_transform → `Transform2d_<slot>`（`UsdTransform2d`）。`texCoord` の上書きにも対応
 - `options.onWarning`: 未対応拡張、POINTS / LINES、POSITION なし、アニメーション / スキン / カメラ / モーフ、複数シーン、
-  解決できない画像、PNG / JPEG 以外の画像、TEXCOORD_1 以降を参照するテクスチャ
+  解決できない画像、PNG / JPEG 以外の画像、マテリアルが使う TEXCOORD_n が Mesh にない
 
 ### 未対応（既知）
 - ノード間で共有されるメッシュは複製している（instancing なし）
-- TEXCOORD_1、KHR_texture_transform、KHR_materials_*、KHR_mesh_quantization（normalized は読めるので一部は動く）
+- KHR_materials_*、KHR_mesh_quantization（normalized は読めるので一部は動く）
 - POINTS / LINES プリミティブ（スキップして警告）
 - アニメーション、スキン、モーフターゲット、カメラ、ライト
 - 外部ファイル参照の `.gltf`（`uri` が data: 以外だと throw）
@@ -74,6 +78,9 @@ OpenUSD 26.11 の全 30 バリデータに通して error 0 を確認済み。
 7. **prim 名**は `[A-Za-z_][A-Za-z0-9_]*` に `sanitize()` し、兄弟間で `uniqueName()` で重複回避。
    マテリアル名は Mesh が先に参照するため `uniqueMaterialName()` でキャッシュして決定的に生成する。
 8. **数値フォーマット**は `toPrecision(7)` 経由（float 精度相当、ファイルサイズ抑制）。
+9. **KHR_texture_transform** は glTF の V 下向き空間で `uv' = T·R·S·uv`（R = [[cos, sin], [-sin, cos]]）。
+   USD の st = (u, 1-v) に書き直すと `UsdTransform2d` そのもの（scale → 反時計回り rotation [度] → translation）になり、
+   `translation = (offset.x + sin·scale.y, 1 - offset.y - cos·scale.y)`。導出は `textureTransform()` のコメント参照。
 
 ## OpenUSD バリデータに指摘されて直した点（再発注意）
 
@@ -101,8 +108,8 @@ npm run demo                               # 見た目の確認: サンプルと
 ### 段階 2: 幾何・マテリアルの網羅性
 - [ ] 共有メッシュの instancing: `/Root/Meshes/<Mesh>` に実体を置き、ノード側は `references` + `instanceable = true`
       （glTF の `mesh` が複数ノードから参照される場合のみ）
-- [ ] TEXCOORD_1 → `primvars:st1`、`texCoord` フィールドを見てテクスチャごとに `uvReader_st1` を使う
-- [ ] KHR_texture_transform → `UsdTransform2d` シェーダを `uvReader` と `UsdUVTexture` の間に挟む
+- [x] TEXCOORD_1 → `primvars:st1`、`texCoord` フィールドを見てテクスチャごとに `uvReader_st1` を使う（TEXCOORD_n 全般）
+- [x] KHR_texture_transform → `UsdTransform2d` シェーダを `uvReader` と `UsdUVTexture` の間に挟む
 - [ ] KHR_materials_emissive_strength / ior / clearcoat / transmission（UsdPreviewSurface に対応する入力があるもののみ）
 - [x] sampler の wrapS/wrapT（REPEAT / CLAMP_TO_EDGE / MIRRORED_REPEAT → `repeat` / `clamp` / `mirror`）
 - [ ] 外部 `.gltf` 入力（Node なら隣接ファイル、ブラウザなら `File[]` を受け取る resolver を注入）

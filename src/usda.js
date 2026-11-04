@@ -16,7 +16,10 @@ const WRAP_MODES = { 33071: "clamp", 33648: "mirror", 10497: "repeat" };
 
 // glTF extensions whose data the converter uses. Anything else in
 // extensionsUsed is reported through options.onWarning.
-const SUPPORTED_EXTENSIONS = new Set();
+const SUPPORTED_EXTENSIONS = new Set(["KHR_texture_transform"]);
+
+/** USD primvar name for glTF TEXCOORD_n: st, st1, st2, ... */
+const uvSetName = (n) => (n === 0 ? "st" : `st${n}`);
 
 export function gltfToUsda(asset, options = {}) {
   const texturePrefix = options.texturePrefix ?? "textures/";
@@ -189,14 +192,22 @@ function writeMeshPrim(ctx, lines, prim, name, depth) {
     lines.push(`${ind}    )`);
   }
 
-  if (attrs.TEXCOORD_0 !== undefined) {
-    const uv = ctx.asset.accessor(attrs.TEXCOORD_0);
+  // TEXCOORD_n → primvars:st / st1 / st2 ...
+  for (let n = 0; attrs[`TEXCOORD_${n}`] !== undefined; n++) {
+    const uv = ctx.asset.accessor(attrs[`TEXCOORD_${n}`]);
     // glTF UV origin is top-left; USD st origin is bottom-left → flip V.
     const flipped = uv.data.slice();
     for (let i = 1; i < flipped.length; i += 2) flipped[i] = 1 - flipped[i];
-    lines.push(`${ind}    texCoord2f[] primvars:st = [${fmtVecs(flipped, 2)}] (`);
+    lines.push(`${ind}    texCoord2f[] primvars:${uvSetName(n)} = [${fmtVecs(flipped, 2)}] (`);
     lines.push(`${ind}        interpolation = "vertex"`);
     lines.push(`${ind}    )`);
+  }
+  if (hasMaterial) {
+    for (const n of materialTexCoords(ctx.json.materials[prim.material])) {
+      if (attrs[`TEXCOORD_${n}`] === undefined) {
+        ctx.warn(`Mesh "${name}" has no TEXCOORD_${n}, which its material's textures use`);
+      }
+    }
   }
 
   if (attrs.COLOR_0 !== undefined) {
@@ -334,41 +345,96 @@ function writeMaterial(ctx, lines, mat, index, depth) {
   lines.push(`${ind}        token outputs:surface`);
   lines.push(`${ind}    }`);
 
-  if (textures.length) {
+  // One primvar reader per UV set in use: uvReader_st, uvReader_st1, ...
+  for (const n of [...new Set(textures.map((t) => t.texCoord))].sort((a, b) => a - b)) {
+    const set = uvSetName(n);
     lines.push("");
-    lines.push(`${ind}    def Shader "uvReader_st"`);
+    lines.push(`${ind}    def Shader "uvReader_${set}"`);
     lines.push(`${ind}    {`);
     lines.push(`${ind}        uniform token info:id = "UsdPrimvarReader_float2"`);
-    lines.push(`${ind}        string inputs:varname = "st"`);
+    lines.push(`${ind}        string inputs:varname = "${set}"`);
     lines.push(`${ind}        float2 outputs:result`);
     lines.push(`${ind}    }`);
-    for (const t of textures) {
+  }
+  for (const t of textures) {
+    let stSource = `${path}/uvReader_${uvSetName(t.texCoord)}.outputs:result`;
+    if (t.transform) {
+      // KHR_texture_transform → UsdTransform2d between the reader and the texture.
+      const name = t.shader.replace(/^Texture_/, "Transform2d_");
+      const { scale, rotation, translation } = t.transform;
       lines.push("");
-      lines.push(`${ind}    def Shader "${t.shader}"`);
+      lines.push(`${ind}    def Shader "${name}"`);
       lines.push(`${ind}    {`);
-      lines.push(`${ind}        uniform token info:id = "UsdUVTexture"`);
-      lines.push(`${ind}        asset inputs:file = @${t.file}@`);
-      lines.push(`${ind}        float2 inputs:st.connect = <${path}/uvReader_st.outputs:result>`);
-      lines.push(`${ind}        token inputs:sourceColorSpace = "${t.colorSpace}"`);
-      lines.push(`${ind}        token inputs:wrapS = "${t.wrapS}"`);
-      lines.push(`${ind}        token inputs:wrapT = "${t.wrapT}"`);
-      if (t.scale) lines.push(`${ind}        float4 inputs:scale = ${fmtTuple(t.scale)}`);
-      if (t.bias) lines.push(`${ind}        float4 inputs:bias = ${fmtTuple(t.bias)}`);
-      lines.push(`${ind}        float outputs:r`);
-      lines.push(`${ind}        float outputs:g`);
-      lines.push(`${ind}        float outputs:b`);
-      lines.push(`${ind}        float outputs:a`);
-      lines.push(`${ind}        float3 outputs:rgb`);
+      lines.push(`${ind}        uniform token info:id = "UsdTransform2d"`);
+      lines.push(`${ind}        float2 inputs:in.connect = <${stSource}>`);
+      lines.push(`${ind}        float inputs:rotation = ${fmt(rotation)}`);
+      lines.push(`${ind}        float2 inputs:scale = ${fmtTuple(scale)}`);
+      lines.push(`${ind}        float2 inputs:translation = ${fmtTuple(translation)}`);
+      lines.push(`${ind}        float2 outputs:result`);
       lines.push(`${ind}    }`);
+      stSource = `${path}/${name}.outputs:result`;
     }
+    lines.push("");
+    lines.push(`${ind}    def Shader "${t.shader}"`);
+    lines.push(`${ind}    {`);
+    lines.push(`${ind}        uniform token info:id = "UsdUVTexture"`);
+    lines.push(`${ind}        asset inputs:file = @${t.file}@`);
+    lines.push(`${ind}        float2 inputs:st.connect = <${stSource}>`);
+    lines.push(`${ind}        token inputs:sourceColorSpace = "${t.colorSpace}"`);
+    lines.push(`${ind}        token inputs:wrapS = "${t.wrapS}"`);
+    lines.push(`${ind}        token inputs:wrapT = "${t.wrapT}"`);
+    if (t.scale) lines.push(`${ind}        float4 inputs:scale = ${fmtTuple(t.scale)}`);
+    if (t.bias) lines.push(`${ind}        float4 inputs:bias = ${fmtTuple(t.bias)}`);
+    lines.push(`${ind}        float outputs:r`);
+    lines.push(`${ind}        float outputs:g`);
+    lines.push(`${ind}        float outputs:b`);
+    lines.push(`${ind}        float outputs:a`);
+    lines.push(`${ind}        float3 outputs:rgb`);
+    lines.push(`${ind}    }`);
   }
 
   lines.push(`${ind}}`);
 }
 
+/** The TEXCOORD sets a material's textures read from. */
+function materialTexCoords(mat) {
+  const pbr = mat.pbrMetallicRoughness || {};
+  const infos = [pbr.baseColorTexture, pbr.metallicRoughnessTexture, mat.normalTexture, mat.occlusionTexture, mat.emissiveTexture];
+  return new Set(infos.filter(Boolean).map(texCoordOf));
+}
+
+function texCoordOf(texInfo) {
+  return texInfo.extensions?.KHR_texture_transform?.texCoord ?? texInfo.texCoord ?? 0;
+}
+
 /**
- * Resolve a glTF textureInfo to { file, wrapS, wrapT }, registering the image
- * bytes for packaging. Returns null (with a warning) when it can't be used.
+ * KHR_texture_transform → UsdTransform2d inputs, or null for identity.
+ *
+ * glTF applies uv' = T · R · S · uv in its V-down UV space, with
+ * R = [[cos, sin], [-sin, cos]]. Rewriting that for USD's st = (u, 1 - v)
+ * gives st' = Rccw(rotation) · diag(scale) · st + t, which is exactly
+ * UsdTransform2d (scale, then counter-clockwise rotation in degrees, then
+ * translation) with t = (offset.x + sin·scale.y, 1 - offset.y - cos·scale.y).
+ */
+function textureTransform(texInfo) {
+  const ext = texInfo.extensions?.KHR_texture_transform;
+  if (!ext) return null;
+  const [ox, oy] = ext.offset ?? [0, 0];
+  const [sx, sy] = ext.scale ?? [1, 1];
+  const r = ext.rotation ?? 0;
+  if (ox === 0 && oy === 0 && sx === 1 && sy === 1 && r === 0) return null;
+  const c = Math.cos(r), s = Math.sin(r);
+  return {
+    scale: [sx, sy],
+    rotation: (r * 180) / Math.PI,
+    translation: [ox + s * sy, 1 - oy - c * sy],
+  };
+}
+
+/**
+ * Resolve a glTF textureInfo to { file, wrapS, wrapT, texCoord, transform },
+ * registering the image bytes for packaging. Returns null (with a warning)
+ * when it can't be used.
  */
 function textureFile(ctx, texInfo) {
   if (!texInfo) return null;
@@ -381,13 +447,16 @@ function textureFile(ctx, texInfo) {
     ctx.warn(`Texture ${texInfo.index} has no PNG/JPEG source (image extensions are not supported); ignored`);
     return null;
   }
-  if ((texInfo.texCoord ?? 0) !== 0) {
-    ctx.warn(`TEXCOORD_${texInfo.texCoord} is not supported yet; texture ${texInfo.index} uses TEXCOORD_0`);
-  }
   const file = imageFile(ctx, tex.source);
   if (!file) return null;
   const sampler = tex.sampler !== undefined ? ctx.json.samplers?.[tex.sampler] ?? {} : {};
-  return { file, wrapS: wrapMode(ctx, sampler.wrapS), wrapT: wrapMode(ctx, sampler.wrapT) };
+  return {
+    file,
+    wrapS: wrapMode(ctx, sampler.wrapS),
+    wrapT: wrapMode(ctx, sampler.wrapT),
+    texCoord: texCoordOf(texInfo),
+    transform: textureTransform(texInfo),
+  };
 }
 
 function wrapMode(ctx, glMode) {

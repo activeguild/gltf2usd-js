@@ -31,17 +31,37 @@ const warnings = [];
 const f = glbToUsda(features, { onWarning: (msg) => warnings.push(msg) });
 
 // Image name collisions → distinct file names, each referenced once.
-assert(f.files.map((x) => x.name).join() === "textures/tex.png,textures/tex_1.png", `deduped image names: ${f.files.map((x) => x.name)}`);
+assert(f.files.map((x) => x.name).join() === "textures/tex.png,textures/tex_1.png,textures/quadrants.png", `deduped image names: ${f.files.map((x) => x.name)}`);
 assert(f.usda.includes("@textures/tex.png@") && f.usda.includes("@textures/tex_1.png@"), "both textures referenced");
 
 // Sampler wrap modes.
 const matA = f.usda.slice(f.usda.indexOf('def Material "A"'), f.usda.indexOf('def Material "B"'));
-const matB = f.usda.slice(f.usda.indexOf('def Material "B"'));
+const matB = f.usda.slice(f.usda.indexOf('def Material "B"'), f.usda.indexOf('def Material "C"'));
+const matC = f.usda.slice(f.usda.indexOf('def Material "C"'), f.usda.indexOf('def Material "D"'));
+const matD = f.usda.slice(f.usda.indexOf('def Material "D"'));
 assert(matA.includes('token inputs:wrapS = "clamp"') && matA.includes('token inputs:wrapT = "mirror"'), "CLAMP_TO_EDGE / MIRRORED_REPEAT");
 assert(matB.includes('token inputs:wrapS = "repeat"') && matB.includes('token inputs:wrapT = "repeat"'), "default sampler = repeat");
 
+// TEXCOORD_1 → primvars:st1 on the mesh, and a dedicated reader in the material.
+const meshC = f.usda.slice(f.usda.indexOf('def Mesh "CubeC"'), f.usda.indexOf('def Xform "Transformed"'));
+assert(meshC.includes("texCoord2f[] primvars:st = [") && meshC.includes("texCoord2f[] primvars:st1 = ["), "mesh writes st and st1");
+assert(meshC.includes("primvars:st1 = [(0, 1), (0.5, 1), (0.5, 0.5), "), "st1 is V-flipped TEXCOORD_1");
+assert(matC.includes('string inputs:varname = "st1"') && !matC.includes('def Shader "uvReader_st"\n'), "material C reads st1 only");
+assert(matC.includes("inputs:st.connect = </Root/Materials/C/uvReader_st1.outputs:result>"), "texture C connected to st1");
+
+// KHR_texture_transform → UsdTransform2d between reader and texture.
+assert(matD.includes('uniform token info:id = "UsdTransform2d"'), "Transform2d shader");
+assert(matD.includes("float2 inputs:in.connect = </Root/Materials/D/uvReader_st.outputs:result>"), "Transform2d input");
+assert(matD.includes("inputs:st.connect = </Root/Materials/D/Transform2d_baseColor.outputs:result>"), "texture reads transformed st");
+assert(matD.includes("float inputs:rotation = 28.64789"), "rotation in degrees");
+assert(matD.includes("float2 inputs:scale = (1.5, 0.75)"), "scale");
+// translation = (0.25 + sin(0.5) * 0.75, 1 - 0.1 - cos(0.5) * 0.75)
+assert(matD.includes("float2 inputs:translation = (0.6095692, 0.2418131)"), "translation converted to USD st space");
+assert(!matA.includes("UsdTransform2d"), "no transform without the extension");
+
 // Warnings: unsupported extension, skipped LINES primitive; each reported once.
 assert(warnings.some((w) => w.includes("KHR_materials_unlit")), "warns about unsupported extension");
+assert(!warnings.some((w) => w.includes("KHR_texture_transform") || w.includes("TEXCOORD")), `no warning for supported UV features: ${warnings}`);
 assert(warnings.some((w) => w.includes("LINES")), "warns about LINES primitive");
 assert(new Set(warnings).size === warnings.length, "warnings are deduplicated");
 assert(!f.usda.includes('"CubeB_1"'), "LINES primitive not written");

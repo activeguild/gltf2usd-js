@@ -113,11 +113,15 @@ export function buildUsdScene(layer, entries) {
       geom.computeVertexNormals();
     }
 
-    const st = prim.props.get("primvars:st");
-    if (st?.value) geom.setAttribute("uv", expandPrimvar(prim, st, 2, corners, vertexOf, "vertex"));
-    for (const name of prim.props.keys()) {
-      if (/^primvars:st\d+$/.test(name) || name === "primvars:UVMap") warn(`${name} はプレビューでは使われない`);
+    // primvars:st / st1 / st2 / st3 → three.js uv / uv1 / uv2 / uv3 (texture.channel 0..3)
+    for (const [name, prop] of prim.props) {
+      const m = /^primvars:st(\d*)$/.exec(name);
+      if (!m || !prop.value) continue;
+      const channel = Number(m[1] || 0);
+      if (channel > 3) { warn(`${name}: three.js は UV セットを 4 つまでしか扱えない`); continue; }
+      geom.setAttribute(channel ? `uv${channel}` : "uv", expandPrimvar(prim, prop, 2, corners, vertexOf, "vertex"));
     }
+    if (prim.props.has("primvars:UVMap")) warn("primvars:UVMap はプレビューでは使われない");
 
     const dc = prim.props.get("primvars:displayColor");
     if (dc?.value) geom.setAttribute("color", expandPrimvar(prim, dc, 3, corners, vertexOf, "constant"));
@@ -309,13 +313,22 @@ export function buildUsdScene(layer, entries) {
       const g = (n, d) => node.props.get(`inputs:${n}`)?.value ?? d;
       const [sx, sy] = g("scale", [1, 1]);
       const [tx, ty] = g("translation", [0, 0]);
+      const r = (g("rotation", 0) * Math.PI) / 180;
+      const c = Math.cos(r), s = Math.sin(r);
+      // UsdTransform2d: st' = Rccw(r) · diag(scale) · st + translation.
+      // With flipY, three.js uv space is USD st space, so this is the uv matrix as-is.
       tex.matrixAutoUpdate = false;
-      tex.matrix.setUvTransform(tx, ty, sx, sy, (g("rotation", 0) * Math.PI) / 180, 0, 0);
+      tex.matrix.set(c * sx, -s * sy, tx, s * sx, c * sy, ty, 0, 0, 1);
       const inConn = node.props.get("inputs:in")?.connect?.[0];
       node = inConn && prims.get(splitPropPath(inConn)[0]);
     }
     const varname = node?.props.get("inputs:varname")?.value;
-    if (varname && varname !== "st") warn(`varname "${varname}" の UV セットはプレビューでは st として表示`);
+    const m = /^st(\d*)$/.exec(varname ?? "st");
+    if (m && Number(m[1] || 0) <= 3) {
+      tex.channel = Number(m[1] || 0);
+    } else {
+      warn(`varname "${varname}" の UV セットはプレビューでは st として表示`);
+    }
 
     textureCache.set(texPrim.path, tex);
     return tex;

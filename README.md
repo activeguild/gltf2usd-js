@@ -69,6 +69,8 @@ GLB を選ぶかドロップすると（またはサンプルボタンで）、�
 - マテリアル: baseColor (factor/texture)、metallicRoughness、normal、occlusion、emissive、alphaMode (BLEND/MASK)
 - テクスチャの USDZ 同梱（PNG / JPEG）。同名画像は `name_1.png` のように重複回避
 - sampler の wrapS / wrapT（REPEAT / CLAMP_TO_EDGE / MIRRORED_REPEAT → `repeat` / `clamp` / `mirror`）
+- TEXCOORD_1 以降（`primvars:st1` …）、テクスチャごとの `texCoord`
+- KHR_texture_transform（`UsdTransform2d`）
 - `options.onWarning` で、変換で捨てた情報を通知（CLI は標準エラーに出力）
 - OpenUSD 26.x の全バリデータで error 0 を確認済み
 
@@ -78,12 +80,14 @@ GLB を選ぶかドロップすると（またはサンプルボタンで）、�
 - glTF の column-major 行列は、USD の row-vector 規約で 4 行ずつ書くとそのまま一致する（平行移動が最終行）。
 - glTF の metallicRoughness テクスチャは G=roughness, B=metallic なので `outputs:g` / `outputs:b` をそれぞれ接続し、factor は `inputs:scale` で乗算。
 - 法線マップは `scale=(2,2,2,1)`, `bias=(-1,-1,-1,0)` で [0,1] → [-1,1] に展開。
+- KHR_texture_transform は V 反転後の st 空間に書き直すと `UsdTransform2d` と同じ形（scale → 回転 → 平行移動）になる。
+  平行移動だけ `(offset.x + sin·scale.y, 1 - offset.y - cos·scale.y)` に変換する。
 - USDZ は圧縮禁止・各ファイルのデータ先頭が 64 バイト境界必須。zip の extra field でパディングしている。
 
 ## ロードマップ
 
 1. ~~GLB パーサ + USDA + USDZ~~ ✅
-2. 共有メッシュの instancing（現在はノードごとに複製）、TEXCOORD_1、KHR_materials_* 拡張、KHR_texture_transform
+2. 共有メッシュの instancing（現在はノードごとに複製）、~~TEXCOORD_1~~ ✅、KHR_materials_* 拡張、~~KHR_texture_transform~~ ✅
 3. アニメーション → `timeSamples`
 4. スキン → UsdSkel、モーフターゲット → BlendShape
 5. USDC (Crate) バイナリ書き出し（`pxr/usd/usd/crateFile.cpp` を参照）
