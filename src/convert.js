@@ -10,6 +10,7 @@
 
 import { Layer, Prim } from "./ir.js";
 import { DataUnavailableError, GltfValidationError } from "./glb.js";
+import { checkIndexValues } from "./validate.js";
 import { sanitize, uniqueName } from "./names.js";
 import { composeTRS } from "./math.js";
 
@@ -550,6 +551,12 @@ function buildMeshPrim(ctx, parent, prim, name, skel = null, gltfMesh = null) {
 function buildMeshPrimData(ctx, parent, prim, name, skel, gltfMesh) {
   const mode = prim.mode ?? MODE_TRIANGLES;
   if (mode !== MODE_TRIANGLES && mode !== MODE_TRIANGLE_STRIP && mode !== MODE_TRIANGLE_FAN) {
+    // Not converted, but its indices are still checked (reserved value, vertex count) so an
+    // invalid file is rejected whatever its modes; the output is unchanged.
+    if (prim.indices !== undefined && prim.attributes?.POSITION !== undefined) {
+      const vertexCount = ctx.json.accessors[prim.attributes.POSITION].count;
+      checkIndexValues(ctx.asset.accessor(prim.indices).data, ctx.json.accessors[prim.indices].componentType, vertexCount, `${primitiveLabel(ctx, gltfMesh, prim)}: indices (accessor ${prim.indices})`);
+    }
     ctx.warn(`Primitive mode ${MODE_NAMES[mode] ?? mode} is not supported; skipped (mesh "${name}")`);
     return;
   }
@@ -560,7 +567,7 @@ function buildMeshPrimData(ctx, parent, prim, name, skel, gltfMesh) {
   }
 
   const pos = ctx.asset.accessor(attrs.POSITION);
-  const where = `mesh ${ctx.json.meshes.indexOf(gltfMesh)} primitive ${gltfMesh.primitives.indexOf(prim)}`;
+  const where = primitiveLabel(ctx, gltfMesh, prim);
   const indices = buildTriangleIndices(ctx, prim, mode, pos.count, where);
   const triCount = indices.length / 3;
 
@@ -796,15 +803,18 @@ function buildDefaultMaterial(scope, name) {
   surface.attr("token", "outputs:surface");
 }
 
+/** "mesh M primitive P" for messages. */
+function primitiveLabel(ctx, gltfMesh, prim) {
+  return `mesh ${ctx.json.meshes.indexOf(gltfMesh)} primitive ${gltfMesh.primitives.indexOf(prim)}`;
+}
+
 function buildTriangleIndices(ctx, prim, mode, vertexCount, where) {
   let idx;
   if (prim.indices !== undefined) {
     idx = ctx.asset.accessor(prim.indices).data;
-    // Index values are only known after decoding (sparse / meshopt), so they are checked here.
-    const bad = idx.findIndex((v) => v >= vertexCount);
-    if (bad >= 0) {
-      throw new GltfValidationError(`${where}: indices (accessor ${prim.indices}) value ${bad} is ${idx[bad]}, but POSITION has ${vertexCount} vertices`);
-    }
+    // Index values are only known after decoding (sparse / meshopt), so they are checked here:
+    // not the component type's reserved maximum, and below the vertex count.
+    checkIndexValues(idx, ctx.json.accessors[prim.indices].componentType, vertexCount, `${where}: indices (accessor ${prim.indices})`);
   } else {
     idx = Array.from({ length: vertexCount }, (_, i) => i);
   }

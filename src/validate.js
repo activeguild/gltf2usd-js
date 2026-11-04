@@ -136,6 +136,40 @@ function checkAttribute(rules, name, acc, label, quantization, fail, custom = nu
   }
 }
 const MODE_TRIANGLES = 4;
+// Element counts per primitive mode (glTF 2.0 § 3.7.2.1), for the indices or, without
+// indices, the vertices: at least `min`, and a multiple of `multiple`.
+const MODE_RULES = [
+  { name: "POINTS", min: 1, multiple: 1 },
+  { name: "LINES", min: 2, multiple: 2 },
+  { name: "LINE_LOOP", min: 2, multiple: 1 },
+  { name: "LINE_STRIP", min: 2, multiple: 1 },
+  { name: "TRIANGLES", min: 3, multiple: 3 },
+  { name: "TRIANGLE_STRIP", min: 3, multiple: 1 },
+  { name: "TRIANGLE_FAN", min: 3, multiple: 1 },
+];
+/** Error message when `count` elements do not fit `mode`, else null. */
+function modeCountProblem(mode, count) {
+  const { name, min, multiple } = MODE_RULES[mode];
+  if (count >= min && count % multiple === 0) return null;
+  const need = multiple > 1 ? `at least ${min} and a multiple of ${multiple}` : `at least ${min}`;
+  return `mode ${mode} (${name}) needs ${need}, got ${count}`;
+}
+// Index values reserved by each index component type (§ 3.7.2.1: the maximum value, used
+// as primitive restart by some APIs, MUST NOT be used).
+export const RESERVED_INDEX = { 5121: 255, 5123: 65535, 5125: 4294967295 };
+
+/**
+ * Check decoded index values: not the component type's reserved maximum, and below the
+ * vertex count. `where` names the primitive and accessor; throws GltfValidationError.
+ */
+export function checkIndexValues(values, componentType, vertexCount, where) {
+  const reserved = RESERVED_INDEX[componentType];
+  for (let i = 0; i < values.length; i++) {
+    const v = values[i];
+    if (v === reserved) throw new GltfValidationError(`${where} value ${i} is ${v}, the reserved maximum of ${COMPONENT_NAME[componentType]} (not allowed as an index)`);
+    if (v >= vertexCount) throw new GltfValidationError(`${where} value ${i} is ${v}, but POSITION has ${vertexCount} vertices`);
+  }
+}
 // Top-level arrays whose elements the converter reads as objects.
 const OBJECT_ARRAYS = ["accessors", "animations", "buffers", "bufferViews", "cameras", "images", "materials",
   "meshes", "nodes", "samplers", "scenes", "skins", "textures"];
@@ -333,9 +367,11 @@ export function validateDocument(json, limits) {
         if (idx.type !== "SCALAR") fail(`${label} must be SCALAR, not ${idx.type}`);
         if (!INDEX_TYPES.has(idx.componentType)) fail(`${label} componentType ${idx.componentType} must be 5121, 5123 or 5125`);
         if (idx.normalized) fail(`${label} must not be normalized`);
-        if (mode === MODE_TRIANGLES && idx.count % 3) fail(`${label} has ${idx.count} indices, not a multiple of 3 (TRIANGLES)`);
-      } else if (mode === MODE_TRIANGLES && position && vertexCount % 3) {
-        fail(`${where}: ${vertexCount} vertices without indices, not a multiple of 3 (TRIANGLES)`);
+        const problem = modeCountProblem(mode, idx.count);
+        if (problem) fail(`${label}: ${problem} indices`);
+      } else if (position) {
+        const problem = modeCountProblem(mode, vertexCount);
+        if (problem) fail(`${where}: without indices, POSITION (accessor ${attributes.POSITION}): ${problem} vertices`);
       }
       list(p, "targets", where).forEach((t, ti) => {
         if (!isObject(t)) fail(`${where} target ${ti} must be an object`);

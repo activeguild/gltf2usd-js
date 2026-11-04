@@ -141,7 +141,9 @@ GLB を選ぶかドロップすると（またはサンプルボタンで）、�
   （壊れた zip を作らないため。ZIP64 は Quick Look などの対応が不確かなので実装していない）。
 - **入力の検証**: データを読む・シーンをたどるのに使う参照とバイト範囲（buffer / bufferView / accessor / mesh / node / skin /
   animation）、頂点属性の要素数（独自属性も含め POSITION と同じ）・TEXCOORD_n / COLOR_n / JOINTS_n / WEIGHTS_n の番号（0 から連続、先頭ゼロなし、9 桁まで）・type・componentType（KHR_mesh_quantization の整数型は宣言されているときだけ）、JOINTS_n / WEIGHTS_n の対、
-  POSITION の有無、独自属性（名前は `_` で始まり、UNSIGNED_INT は不可）、accessor の normalized（boolean で、FLOAT / UNSIGNED_INT には付けられない）、
+  POSITION の有無、モードごとの要素数（POINTS ≥ 1、LINES ≥ 2 かつ偶数、LINE_LOOP / LINE_STRIP ≥ 2、TRIANGLES ≥ 3 かつ 3 の倍数、
+  TRIANGLE_STRIP / FAN ≥ 3。インデックスがなければ頂点数）、インデックスの予約値（UNSIGNED_BYTE 255 / UNSIGNED_SHORT 65535 /
+  UNSIGNED_INT 4294967295 は使えない）、独自属性（名前は `_` で始まり、UNSIGNED_INT は不可）、accessor の normalized（boolean で、FLOAT / UNSIGNED_INT には付けられない）、
   EXT_mesh_gpu_instancing の属性（型・count の一致・構造）、インデックス（型・値の範囲・TRIANGLES は 3 の倍数）、sparse の構造と昇順、accessor / sparse のアライメントと byteStride の使い方、
   JSON の型（配列・オブジェクト）は変換前にすべて検査し、不正なら `GltfValidationError`（何番の何が不正かをメッセージに入れる）。0 埋めや切り詰めで
   変換を続けることはしない。マテリアル / テクスチャ / 画像 / ライト / バリアントの不正な参照は、従来どおりその参照を無視して警告する

@@ -1,7 +1,7 @@
 // GLB / glTF input validation (src/validate.js, parseGLB): invalid input throws
 // GltfValidationError with a message naming the problem; valid edge cases still convert.
 import { glbToUsda, GltfValidationError, DEFAULT_LIMITS } from "../src/index.js";
-import { makeGlb, triangleDoc, clone } from "./gltf-builder.js";
+import { makeGlb, packParts, triangleDoc, clone } from "./gltf-builder.js";
 
 let failures = 0;
 const assert = (c, m) => { if (!c) { console.error("FAIL:", m); failures++; } };
@@ -244,11 +244,121 @@ assert(DEFAULT_LIMITS.maxNodeDepth === 1024 && Object.isFrozen(DEFAULT_LIMITS), 
     new DataView(b.buffer).setUint16(40, 65535, true);
     rejects(makeGlb(json, b), /value 2 is 65535/, "primitive-restart-like index");
   }
-  rejects(withJson((j) => { j.accessors[1].count = 2; }), /indices \(accessor 1\) has 2 indices, not a multiple of 3 \(TRIANGLES\)/, "TRIANGLES index count not a multiple of 3");
-  rejects(withJson((j) => { delete j.meshes[0].primitives[0].indices; j.accessors[0].count = 2; }), /2 vertices without indices, not a multiple of 3/, "TRIANGLES vertex count not a multiple of 3");
+  rejects(withJson((j) => { j.accessors[1].count = 2; }), /mesh 0 primitive 0: indices \(accessor 1\): mode 4 \(TRIANGLES\) needs at least 3 and a multiple of 3, got 2 indices/, "TRIANGLES index count not a multiple of 3");
+  rejects(withJson((j) => { delete j.meshes[0].primitives[0].indices; j.accessors[0].count = 2; }), /mesh 0 primitive 0: without indices, POSITION \(accessor 0\): mode 4 \(TRIANGLES\) needs at least 3 and a multiple of 3, got 2 vertices/, "TRIANGLES vertex count not a multiple of 3");
   // Strips / fans have no multiple-of-3 rule.
   assert(accepts(withJson((j) => { j.meshes[0].primitives[0].mode = 5; }), "strip").includes("def Mesh"), "TRIANGLE_STRIP with 3 indices");
   rejects(withJson((j) => { j.meshes[0].primitives[0].mode = 9; }), /mode 9 is not a glTF primitive mode/, "unknown primitive mode");
+}
+
+// ---- Element counts per primitive mode ----
+{
+  /**
+   * One primitive: POSITION = `vertices` zero vertices (no bufferView), optional indices
+   * (values 0, 1, 2, ... wrapped to the vertex count) of the given component type.
+   */
+  const modeDoc = ({ mode, vertices, indices = null, componentType = 5123, values }) => {
+    const j = { asset: { version: "2.0" }, scenes: [{ nodes: [0] }], nodes: [{ mesh: 0 }], meshes: [{ primitives: [{ attributes: { POSITION: 0 }, mode }] }],
+      accessors: [{ componentType: 5126, count: vertices, type: "VEC3" }] };
+    if (indices === null) return makeGlb(j);
+    const data = values ?? Array.from({ length: indices }, (_, i) => (vertices ? i % vertices : 0));
+    const Typed = { 5121: Uint8Array, 5123: Uint16Array, 5125: Uint32Array }[componentType];
+    const { bin, views } = packParts([Typed.from(data)]);
+    j.bufferViews = views;
+    j.buffers = [{ byteLength: bin.length }];
+    j.accessors.push({ bufferView: 0, componentType, count: data.length, type: "SCALAR" });
+    j.meshes[0].primitives[0].indices = 1;
+    return makeGlb(j, bin);
+  };
+  const ok = (opts, label) => { accepts(modeDoc(opts), label); };
+  const bad = (opts, pattern, label) => rejects(modeDoc(opts), pattern, label);
+  const CASES = [
+    // [mode, accepted counts, rejected counts]
+    [0, [1, 2], [0]],
+    [1, [2, 4], [1, 3, 0]],
+    [2, [2, 3], [1, 0]],
+    [3, [2, 3], [1, 0]],
+    [4, [3, 6], [0, 2, 4]],
+    [5, [3, 4], [1, 2]],
+    [6, [3, 4], [1, 2]],
+  ];
+  const NAMES = ["POINTS", "LINES", "LINE_LOOP", "LINE_STRIP", "TRIANGLES", "TRIANGLE_STRIP", "TRIANGLE_FAN"];
+  for (const [mode, good, wrong] of CASES) {
+    for (const n of good) {
+      ok({ mode, vertices: Math.max(n, 1), indices: n }, `${NAMES[mode]} with ${n} indices`);
+      ok({ mode, vertices: n }, `${NAMES[mode]} with ${n} vertices, no indices`);
+    }
+    for (const n of wrong) {
+      bad({ mode, vertices: Math.max(n, 3), indices: n }, new RegExp(`mesh 0 primitive 0: indices \\(accessor 1\\): mode ${mode} \\(${NAMES[mode]}\\) needs at least .*, got ${n} indices`), `${NAMES[mode]} with ${n} indices`);
+      bad({ mode, vertices: n }, new RegExp(`mesh 0 primitive 0: without indices, POSITION \\(accessor 0\\): mode ${mode} \\(${NAMES[mode]}\\) needs at least .*, got ${n} vertices`), `${NAMES[mode]} with ${n} vertices, no indices`);
+    }
+  }
+  // Mode omitted = TRIANGLES; LINES messages name the even-count rule.
+  bad({ vertices: 3, indices: 4 }, /mode 4 \(TRIANGLES\) needs at least 3 and a multiple of 3, got 4 indices/, "mode omitted = TRIANGLES");
+  bad({ mode: 1, vertices: 3 }, /mode 1 \(LINES\) needs at least 2 and a multiple of 2, got 3 vertices/, "LINES 3 vertices, no indices");
+  ok({ mode: 1, vertices: 4 }, "LINES 4 vertices, no indices");
+
+  // ---- Reserved index values (§ 3.7.2.1) ----
+  ok({ mode: 4, vertices: 255, indices: 3, componentType: 5121, values: [254, 0, 1] }, "UNSIGNED_BYTE 254 with 255 vertices");
+  bad({ mode: 4, vertices: 300, indices: 3, componentType: 5121, values: [0, 255, 1] },
+    /mesh 0 primitive 0: indices \(accessor 1\) value 1 is 255, the reserved maximum of UNSIGNED_BYTE \(not allowed as an index\)/, "UNSIGNED_BYTE 255 with 300 vertices");
+  ok({ mode: 4, vertices: 65535, indices: 3, componentType: 5123, values: [65534, 0, 1] }, "UNSIGNED_SHORT 65534 with 65535 vertices");
+  bad({ mode: 4, vertices: 70000, indices: 3, componentType: 5123, values: [0, 1, 65535] },
+    /indices \(accessor 1\) value 2 is 65535, the reserved maximum of UNSIGNED_SHORT/, "UNSIGNED_SHORT 65535 with 70000 vertices");
+  bad({ mode: 4, vertices: 3, indices: 3, componentType: 5125, values: [0, 4294967295, 1] },
+    /value 1 is 4294967295, the reserved maximum of UNSIGNED_INT/, "UNSIGNED_INT 4294967295");
+  // The reserved maximum and the vertex count give distinct messages.
+  bad({ mode: 4, vertices: 3, indices: 3, componentType: 5121, values: [0, 1, 3] }, /value 2 is 3, but POSITION has 3 vertices/, "index = vertex count");
+  // Skipped modes (POINTS / LINES are not converted) still have their indices checked.
+  bad({ mode: 0, vertices: 300, indices: 2, componentType: 5121, values: [0, 255] }, /value 1 is 255, the reserved maximum of UNSIGNED_BYTE/, "POINTS with a reserved index");
+  bad({ mode: 1, vertices: 2, indices: 2, componentType: 5121, values: [0, 2] }, /value 1 is 2, but POSITION has 2 vertices/, "LINES index past the vertices");
+  // Without indices no reserved value applies (vertex 255 of 300 is just a vertex).
+  ok({ mode: 4, vertices: 300 }, "300 vertices without indices");
+  // The checker itself, for counts too large to build: UNSIGNED_INT 4294967294 with 2^32 - 1 vertices.
+  {
+    const { checkIndexValues } = await import("../src/validate.js");
+    try { checkIndexValues([4294967294, 0], 5125, 4294967295, "test"); } catch (e) { assert(false, `UNSIGNED_INT 4294967294 with 4294967295 vertices: ${e.message}`); }
+    try { checkIndexValues([4294967295], 5125, 2 ** 40, "test"); assert(false, "UNSIGNED_INT 4294967295 accepted"); }
+    catch (e) { assert(e instanceof GltfValidationError && /reserved maximum of UNSIGNED_INT/.test(e.message), `UNSIGNED_INT reserved: ${e.message}`); }
+    try { checkIndexValues([65534], 5123, 65535, "test"); checkIndexValues([254], 5121, 255, "test"); } catch (e) { assert(false, `largest allowed values: ${e.message}`); }
+    try { checkIndexValues([65535], 5123, 2 ** 20, "test"); assert(false, "UNSIGNED_SHORT 65535 accepted"); }
+    catch (e) { assert(/reserved maximum of UNSIGNED_SHORT/.test(e.message), `UNSIGNED_SHORT reserved: ${e.message}`); }
+  }
+  // Sparse index accessors: the decoded (sparse-applied) values are checked.
+  {
+    const sparseIdx = (value, vertices) => {
+      const { bin, views } = packParts([Uint8Array.from([2]), Uint8Array.from([value])]);
+      const j = { asset: { version: "2.0" }, scenes: [{ nodes: [0] }], nodes: [{ mesh: 0 }],
+        meshes: [{ primitives: [{ attributes: { POSITION: 0 }, indices: 1 }] }],
+        accessors: [{ componentType: 5126, count: vertices, type: "VEC3" },
+          { componentType: 5121, count: 3, type: "SCALAR", sparse: { count: 1, indices: { bufferView: 0, componentType: 5121 }, values: { bufferView: 1 } } }],
+        bufferViews: views, buffers: [{ byteLength: bin.length }] };
+      return makeGlb(j, bin);
+    };
+    accepts(sparseIdx(2, 3), "sparse index 2 of 3 vertices");
+    rejects(sparseIdx(255, 300), /mesh 0 primitive 0: indices \(accessor 1\) value 2 is 255, the reserved maximum of UNSIGNED_BYTE/, "sparse reserved index");
+    rejects(sparseIdx(5, 3), /value 2 is 5, but POSITION has 3 vertices/, "sparse index past the vertices");
+  }
+  // EXT_meshopt_compression-decoded indices: the decoded values are checked.
+  {
+    const { VECTORS } = await import("./meshopt-vectors.js");
+    const vec = VECTORS.find((v) => v.mode === "INDICES");
+    const bytes = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    const encoded = bytes(vec.encoded);
+    const decoded = new Uint16Array(bytes(vec.expected).buffer);
+    const max = Math.max(...decoded);
+    const meshopt = (vertices) => {
+      const size = vec.count * vec.byteStride;
+      const j = { asset: { version: "2.0" }, extensionsUsed: ["EXT_meshopt_compression"], extensionsRequired: ["EXT_meshopt_compression"],
+        scenes: [{ nodes: [0] }], nodes: [{ mesh: 0 }], meshes: [{ primitives: [{ attributes: { POSITION: 0 }, indices: 1, mode: 5 }] }],
+        accessors: [{ componentType: 5126, count: vertices, type: "VEC3" }, { bufferView: 0, componentType: 5123, count: vec.count, type: "SCALAR" }],
+        buffers: [{ byteLength: encoded.length }, { byteLength: size, extensions: { EXT_meshopt_compression: { fallback: true } } }],
+        bufferViews: [{ buffer: 1, byteLength: size, extensions: { EXT_meshopt_compression: { buffer: 0, byteLength: encoded.length, byteStride: vec.byteStride, count: vec.count, mode: "INDICES" } } }] };
+      return makeGlb(j, encoded);
+    };
+    assert(accepts(meshopt(max + 1), "meshopt indices within the vertices").includes("def Mesh"), "meshopt-decoded indices accepted");
+    rejects(meshopt(max), new RegExp(`indices \\(accessor 1\\) value \\d+ is ${max}, but POSITION has ${max} vertices`), "meshopt-decoded index past the vertices");
+  }
 }
 
 // ---- JSON structure types ----
