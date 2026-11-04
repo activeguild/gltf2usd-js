@@ -1,0 +1,296 @@
+{
+  "repository": "KhronosGroup/glTF-Sample-Assets",
+  "commit": "8f492390ddc7a2ae221a1369ef560589cf8c70fb",
+  "models": [
+    {
+      "id": "Box",
+      "features": [
+        "static mesh"
+      ],
+      "files": [
+        {
+          "path": "Models/Box/glTF-Binary/Box.glb",
+          "sha256": "ed52f7192b8311d700ac0ce80644e3852cd01537e4d62241b9acba023da3d54e",
+          "bytes": 1664
+        }
+      ]
+    },
+    {
+      "id": "BoxTextured-gltf",
+      "features": [
+        "texture",
+        "external .gltf / .bin / image"
+      ],
+      "files": [
+        {
+          "path": "Models/BoxTextured/glTF/BoxTextured.gltf",
+          "sha256": "1e9003a4a2a8822ff60da529357bd8e4dec4a59b1a479017993e7e2ad5fcebef",
+          "bytes": 3695
+        },
+        {
+          "path": "Models/BoxTextured/glTF/BoxTextured0.bin",
+          "sha256": "2e8c0483fa6665c686ec345f89dcbb2a694a587442584d09f8a83a59633327bc",
+          "bytes": 840
+        },
+        {
+          "path": "Models/BoxTextured/glTF/CesiumLogoFlat.png",
+          "sha256": "9c22b05c5b136d03c5621a8765e50a8322be6c35b9de53e9fe22685840d7f469",
+          "bytes": 3750
+        }
+      ]
+    },
+    {
+      "id": "DamagedHelmet",
+      "features": [
+        "metallic-roughness",
+        "normal map",
+        "occlusion",
+        "emissive"
+      ],
+      "files": [
+        {
+          "path": "Models/DamagedHelmet/glTF-Binary/DamagedHelmet.glb",
+          "sha256": "a1e3b04de97b11de564ce6e53b95f02954a297f0008183ac63a4f5974f6b32d8",
+          "bytes": 3773916
+        }
+      ]
+    },
+    {
+      "id": "CesiumMilkTruck",
+      "features": [
+        "multiple meshes",
+        "multiple materials",
+        "shared mesh instancing",
+        "animation"
+      ],
+      "files": [
+        {
+          "path": "Models/CesiumMilkTruck/glTF-Binary/CesiumMilkTruck.glb",
+          "sha256": "09371b34608116de5842d23abe260bf11acf3e1554daf334a647eb566eee5c49",
+          "bytes": 369980
+        }
+      ]
+    },
+    {
+      "id": "AlphaBlendModeTest",
+      "features": [
+        "alpha MASK",
+        "alpha BLEND"
+      ],
+      "files": [
+        {
+          "path": "Models/AlphaBlendModeTest/glTF-Binary/AlphaBlendModeTest.glb",
+          "sha256": "37c3577d143071b42dd46e9d942b157837eb25c6340112171d7faecaa987b14e",
+          "bytes": 2978812
+        }
+      ]
+    },
+    {
+      "id": "VertexColorTest",
+      "features": [
+        "vertex color"
+      ],
+      "files": [
+        {
+          "path": "Models/VertexColorTest/glTF-Binary/VertexColorTest.glb",
+          "sha256": "58006bdcff8084339da0f6e24400160890638c16dbcb83c362ccaf150e8c6e10",
+          "bytes": 26220
+        }
+      ]
+    },
+    {
+      "id": "RiggedSimple",
+      "features": [
+        "skinning",
+        "animation"
+      ],
+      "files": [
+        {
+          "path": "Models/RiggedSimple/glTF-Binary/RiggedSimple.glb",
+          "sha256": "3a79dabb67bb0cd598a18d08b954d9d357c27c30672f82ef5d3f4e7fe6ca3401",
+          "bytes": 15104
+        }
+      ]
+    },
+    {
+      "id": "CesiumMan",
+      "features": [
+        "skinning",
+        "animation",
+        "texture"
+      ],
+      "files": [
+        {
+          "path": "Models/CesiumMan/glTF-Binary/CesiumMan.glb",
+          "sha256": "b7001eaeea8254bd44773bcd247e78696d94169388fbb2a1800fc69434e777d9",
+          "bytes": 438044
+        }
+      ]
+    },
+    {
+      "id": "Fox",
+      "features": [
+        "skinning",
+        "multiple animations"
+      ],
+      "files": [
+        {
+          "path": "Models/Fox/glTF-Binary/Fox.glb",
+          "sha256": "d97044e701822bac5a62696459b27d7b375aada5de8574ed4362edbba94771f7",
+          "bytes": 162852
+        }
+      ]
+    },
+    {
+      "id": "AnimatedMorphCube",
+      "features": [
+        "morph target",
+        "weights animation"
+      ],
+      "files": [
+        {
+          "path": "Models/AnimatedMorphCube/glTF-Binary/AnimatedMorphCube.glb",
+          "sha256": "214ee56160a50dbf22543a1d66dbf860986e87f0efac3d89feac1359d0e6aeab",
+          "bytes": 6752
+        }
+      ]
+    },
+    {
+      "id": "AnimatedMorphCube-quantized",
+      "features": [
+        "morph target",
+        "KHR_mesh_quantization"
+      ],
+      "files": [
+        {
+          "path": "Models/AnimatedMorphCube/glTF-Quantized/AnimatedMorphCube.gltf",
+          "sha256": "ff514453beb4b2130fe4c0857a71f8af568a86258f814b4c7b9ac9a55722a850",
+          "bytes": 4072
+        },
+        {
+          "path": "Models/AnimatedMorphCube/glTF-Quantized/AnimatedMorphCube.bin",
+          "sha256": "bde22d01f34dd8f5d83cfbb20a1a6d117ec48596157df5d484a58eba13cdff51",
+          "bytes": 1700
+        }
+      ]
+    },
+    {
+      "id": "MorphPrimitivesTest",
+      "features": [
+        "morph target",
+        "multiple primitives"
+      ],
+      "files": [
+        {
+          "path": "Models/MorphPrimitivesTest/glTF-Binary/MorphPrimitivesTest.glb",
+          "sha256": "2a5ed6470aca41edc813ef5b7eecf2af53264d8e0ab9e6f32156d54245ca18cf",
+          "bytes": 53656
+        }
+      ]
+    },
+    {
+      "id": "InterpolationTest",
+      "features": [
+        "STEP / LINEAR / CUBICSPLINE",
+        "multiple animations"
+      ],
+      "files": [
+        {
+          "path": "Models/InterpolationTest/glTF-Binary/InterpolationTest.glb",
+          "sha256": "a86eb331b4a083715e75fe19a1f747eac5692d5b9ff120f1eaa457c23ba72bca",
+          "bytes": 7952
+        }
+      ]
+    },
+    {
+      "id": "SimpleInstancing",
+      "features": [
+        "EXT_mesh_gpu_instancing"
+      ],
+      "files": [
+        {
+          "path": "Models/SimpleInstancing/glTF-Binary/SimpleInstancing.glb",
+          "sha256": "1c9425627481346a8c226118f7000db7cd7f80198e9f54331f8b664d16726f3f",
+          "bytes": 7356
+        }
+      ]
+    },
+    {
+      "id": "MaterialsVariantsShoe",
+      "features": [
+        "KHR_materials_variants",
+        "texture"
+      ],
+      "files": [
+        {
+          "path": "Models/MaterialsVariantsShoe/glTF-Binary/MaterialsVariantsShoe.glb",
+          "sha256": "e1d7cb190382111e5a5b37b51e9a7f007f7eb2ab1b6185e0188e8d0a0d1265a7",
+          "bytes": 7833592
+        }
+      ]
+    },
+    {
+      "id": "Box-draco",
+      "features": [
+        "KHR_draco_mesh_compression (no fallback: skipped)"
+      ],
+      "files": [
+        {
+          "path": "Models/Box/glTF-Draco/Box.gltf",
+          "sha256": "3c46acecdfa90b012ec9052d8a1dfa61358e6d56a9e333504189cc78a2de4d1b",
+          "bytes": 2427
+        },
+        {
+          "path": "Models/Box/glTF-Draco/Box.bin",
+          "sha256": "610dc6e08aba7c2720c8e4ec0578efd91cf2d88a5e638dab7811a22f0235bf2e",
+          "bytes": 120
+        }
+      ]
+    },
+    {
+      "id": "CesiumMilkTruck-draco",
+      "features": [
+        "KHR_draco_mesh_compression (no fallback: skipped)",
+        "animation"
+      ],
+      "files": [
+        {
+          "path": "Models/CesiumMilkTruck/glTF-Draco/CesiumMilkTruck.gltf",
+          "sha256": "f2ed3e8c0cf73bd73709fe7ff62b5d29afd49f48cdac6a59674291e6e40e503d",
+          "bytes": 9882
+        },
+        {
+          "path": "Models/CesiumMilkTruck/glTF-Draco/CesiumMilkTruck_data.bin",
+          "sha256": "a9ec68ba84a345ccb5509c324a013b471c8d1ea96ac305a273c0d3332aacc373",
+          "bytes": 11452
+        },
+        {
+          "path": "Models/CesiumMilkTruck/glTF-Draco/CesiumMilkTruck.jpg",
+          "sha256": "5041b9dcdc5c1587648d829fee1f2e4df373befb29aaf15742d39f83d64e7e2e",
+          "bytes": 218979
+        }
+      ]
+    },
+    {
+      "id": "BrainStem-meshopt",
+      "features": [
+        "EXT_meshopt_compression",
+        "KHR_mesh_quantization",
+        "skinning",
+        "animation"
+      ],
+      "files": [
+        {
+          "path": "Models/BrainStem/glTF-Meshopt-EXT/BrainStem.gltf",
+          "sha256": "75901f9abeff5bf01cff350d08843cc2e93eabd9f99dc52e9552462a26bbd6e0",
+          "bytes": 81504
+        },
+        {
+          "path": "Models/BrainStem/glTF-Meshopt-EXT/BrainStem.bin",
+          "sha256": "ac004b976aa36cd65e03c485cae40aa85341f6653c9795aef2f223cefe14c8c2",
+          "bytes": 347840
+        }
+      ]
+    }
+  ]
+}

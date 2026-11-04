@@ -1,7 +1,7 @@
 {
   "name": "gltf2usd-js",
   "version": "0.1.0",
-  "description": "Dependency-free GLB → USDA/USDZ converter for browser and Node",
+  "description": "Dependency-free GLB \u2192 USDA/USDZ converter for browser and Node",
   "type": "module",
   "main": "src/index.js",
   "bin": {
@@ -9,7 +9,8 @@
   },
   "scripts": {
     "test": "node test/make-glb.js && node test/run.js && node test/validation.js && node test/accessor.js && node test/color.js && node test/usdz.js",
-    "demo": "node demo/server.js"
+    "demo": "node demo/server.js",
+    "test:integration": "node test/integration/run.js"
   },
   "license": "MIT"
 }

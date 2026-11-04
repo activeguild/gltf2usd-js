@@ -7,3 +7,4 @@ test/skinned.glb
 *.usda
 !test/fixtures/*
 test/gltf/
+test/.cache/
