@@ -189,6 +189,12 @@ npm run demo                               # 見た目の確認: サンプルと
 - **マテリアルなしのプリミティブ**: glTF の既定マテリアル（白、metallic 1、roughness 1）を書いていない。USD 側では未バインド扱いで
   灰色に見える（段階 1 からの挙動）。既定マテリアルを出力するか
 
+- **KHR_lights_punctual の強さ**: UsdLux は単位を規定していないので glTF の lux / candela をそのまま書いている。
+  特定のレンダラ（Hydra Storm / RealityKit など）に合わせた換算が要るか
+- **EXT_mesh_gpu_instancing の表現**: 今はインスタンスごとの instanceable reference に展開。数万個になる場合は
+  UsdGeomPointInstancer の方がずっと小さいが、ビューア側の対応を確認してから切り替えたい
+- **Draco**: 非圧縮 fallback がなければスキップ。デコーダを自前で書くか（大きな作業）
+
 ## ロードマップと次のタスク
 
 ### 段階 2: 幾何・マテリアルの網羅性
