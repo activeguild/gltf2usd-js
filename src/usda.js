@@ -18,7 +18,12 @@ const WRAP_MODES = { 33071: "clamp", 33648: "mirror", 10497: "repeat" };
 
 // glTF extensions whose data the converter uses. Anything else in
 // extensionsUsed is reported through options.onWarning.
-const SUPPORTED_EXTENSIONS = new Set(["KHR_texture_transform"]);
+const SUPPORTED_EXTENSIONS = new Set([
+  "KHR_texture_transform",
+  "KHR_materials_emissive_strength",
+  "KHR_materials_ior",
+  "KHR_materials_clearcoat",
+]);
 
 /** USD primvar name for glTF TEXCOORD_n: st, st1, st2, ... */
 const uvSetName = (n) => (n === 0 ? "st" : `st${n}`);
@@ -339,7 +344,10 @@ function writeMaterial(ctx, lines, mat, index, depth) {
   const baseColor = pbr.baseColorFactor || [1, 1, 1, 1];
   const metallic = pbr.metallicFactor ?? 1;
   const roughness = pbr.roughnessFactor ?? 1;
-  const emissive = mat.emissiveFactor || [0, 0, 0];
+  const ext = mat.extensions || {};
+  // KHR_materials_emissive_strength scales emissiveFactor (which glTF caps at 1).
+  const emissiveStrength = ext.KHR_materials_emissive_strength?.emissiveStrength ?? 1;
+  const emissive = (mat.emissiveFactor || [0, 0, 0]).map((v) => v * emissiveStrength);
   const alphaMode = mat.alphaMode || "OPAQUE";
 
   lines.push(`${ind}def Material "${name}"`);
@@ -403,6 +411,35 @@ function writeMaterial(ctx, lines, mat, index, depth) {
     lines.push(`${ind}        color3f inputs:emissiveColor = ${fmtTuple(emissive)}`);
   }
 
+  // KHR_materials_ior → inputs:ior (both default to 1.5)
+  if (ext.KHR_materials_ior?.ior !== undefined) {
+    lines.push(`${ind}        float inputs:ior = ${fmt(ext.KHR_materials_ior.ior)}`);
+  }
+
+  // KHR_materials_clearcoat: factor × texture.r → clearcoat, factor × texture.g → clearcoatRoughness
+  const cc = ext.KHR_materials_clearcoat;
+  if (cc) {
+    const ccFactor = cc.clearcoatFactor ?? 0;
+    const ccRough = cc.clearcoatRoughnessFactor ?? 0;
+    const ccTex = textureFile(ctx, cc.clearcoatTexture);
+    if (ccTex) {
+      textures.push({ shader: "Texture_clearcoat", ...ccTex, colorSpace: "raw", scale: [ccFactor, ccFactor, ccFactor, 1] });
+      lines.push(`${ind}        float inputs:clearcoat.connect = <${path}/Texture_clearcoat.outputs:r>`);
+    } else {
+      lines.push(`${ind}        float inputs:clearcoat = ${fmt(ccFactor)}`);
+    }
+    const ccrTex = textureFile(ctx, cc.clearcoatRoughnessTexture);
+    if (ccrTex) {
+      textures.push({ shader: "Texture_clearcoatRoughness", ...ccrTex, colorSpace: "raw", scale: [ccRough, ccRough, ccRough, 1] });
+      lines.push(`${ind}        float inputs:clearcoatRoughness.connect = <${path}/Texture_clearcoatRoughness.outputs:g>`);
+    } else {
+      lines.push(`${ind}        float inputs:clearcoatRoughness = ${fmt(ccRough)}`);
+    }
+    if (cc.clearcoatNormalTexture) {
+      ctx.warn(`Material "${name}": clearcoatNormalTexture has no UsdPreviewSurface input; ignored`);
+    }
+  }
+
   lines.push(`${ind}        token outputs:surface`);
   lines.push(`${ind}    }`);
 
@@ -460,7 +497,11 @@ function writeMaterial(ctx, lines, mat, index, depth) {
 /** The TEXCOORD sets a material's textures read from. */
 function materialTexCoords(mat) {
   const pbr = mat.pbrMetallicRoughness || {};
-  const infos = [pbr.baseColorTexture, pbr.metallicRoughnessTexture, mat.normalTexture, mat.occlusionTexture, mat.emissiveTexture];
+  const cc = mat.extensions?.KHR_materials_clearcoat || {};
+  const infos = [
+    pbr.baseColorTexture, pbr.metallicRoughnessTexture, mat.normalTexture, mat.occlusionTexture, mat.emissiveTexture,
+    cc.clearcoatTexture, cc.clearcoatRoughnessTexture,
+  ];
   return new Set(infos.filter(Boolean).map(texCoordOf));
 }
 

@@ -34,6 +34,7 @@ export function buildCubeGlb() {
  *  - "UV1": baseColor from TEXCOORD_1 (= TEXCOORD_0 * 0.5, i.e. one quadrant)
  *  - "Transformed": KHR_texture_transform (offset / rotation / scale)
  *  - a child node named like its parent's mesh prim (prim name collision)
+ *  - "Coated": KHR_materials_emissive_strength / ior / clearcoat (+ transmission, unsupported)
  * The quadrant texture (red / green on top, blue / yellow at the bottom) makes
  * flips and rotations visible in the demo.
  * @returns {Uint8Array} GLB bytes
@@ -46,15 +47,19 @@ export function buildFeatureGlb() {
   ]);
   return packGlb({
     asset: { version: "2.0", generator: "test-features" },
-    extensionsUsed: ["KHR_materials_unlit", "KHR_texture_transform"],
+    extensionsUsed: [
+      "KHR_materials_unlit", "KHR_texture_transform", "KHR_materials_emissive_strength",
+      "KHR_materials_ior", "KHR_materials_clearcoat", "KHR_materials_transmission",
+    ],
     scene: 0,
-    scenes: [{ nodes: [0, 1, 2, 3] }],
+    scenes: [{ nodes: [0, 1, 2, 3, 5] }],
     nodes: [
       { name: "Clamped", mesh: 0 },
       { name: "Unlit", mesh: 1, translation: [1.5, 0, 0] },
       { name: "UV1", mesh: 2, translation: [3, 0, 0], children: [4] },
       { name: "Transformed", mesh: 3, translation: [4.5, 0, 0] },
       { name: "CubeC" }, // same name as its parent's mesh prim → must be renamed
+      { name: "Coated", mesh: 4, translation: [6, 0, 0] },
     ],
     meshes: [
       { name: "CubeA", primitives: [{ attributes: { POSITION: 0, NORMAL: 1, TEXCOORD_0: 2 }, indices: 3, material: 0 }] },
@@ -67,6 +72,7 @@ export function buildFeatureGlb() {
       },
       { name: "CubeC", primitives: [{ attributes: { POSITION: 0, NORMAL: 1, TEXCOORD_0: 2, TEXCOORD_1: 4 }, indices: 3, material: 2 }] },
       { name: "CubeD", primitives: [{ attributes: { POSITION: 0, NORMAL: 1, TEXCOORD_0: 2 }, indices: 3, material: 3 }] },
+      { name: "CubeE", primitives: [{ attributes: { POSITION: 0, NORMAL: 1, TEXCOORD_0: 2 }, indices: 3, material: 4 }] },
     ],
     accessors: [...CUBE_ACCESSORS, { bufferView: 5, componentType: 5126, count: 24, type: "VEC2" }],
     bufferViews: views,
@@ -90,6 +96,17 @@ export function buildFeatureGlb() {
             extensions: { KHR_texture_transform: { offset: [0.25, 0.1], rotation: 0.5, scale: [1.5, 0.75] } },
           },
           metallicFactor: 0,
+        },
+      },
+      {
+        name: "E",
+        pbrMetallicRoughness: { baseColorFactor: [0.2, 0.3, 0.8, 1], metallicFactor: 0, roughnessFactor: 0.6 },
+        emissiveFactor: [0.5, 0.25, 0],
+        extensions: {
+          KHR_materials_emissive_strength: { emissiveStrength: 2 },
+          KHR_materials_ior: { ior: 1.33 },
+          KHR_materials_clearcoat: { clearcoatFactor: 0.8, clearcoatRoughnessTexture: { index: 2 }, clearcoatRoughnessFactor: 0.5 },
+          KHR_materials_transmission: { transmissionFactor: 0.5 },
         },
       },
     ],

@@ -53,11 +53,13 @@ OpenUSD 26.11 の全 30 バリデータに通して error 0 を確認済み。
 - TEXCOORD_n → `primvars:st` / `st1` / `st2` …、テクスチャの `texCoord` ごとに `uvReader_st<n>`
 - KHR_texture_transform → `Transform2d_<slot>`（`UsdTransform2d`）。`texCoord` の上書きにも対応
 - 複数ノードで共有されるメッシュ → `class Xform "Meshes"` 下のプロトタイプ + `instanceable` な internal reference
+- KHR_materials_emissive_strength（emissiveColor に乗算）、KHR_materials_ior（`inputs:ior`）、
+  KHR_materials_clearcoat（`inputs:clearcoat` / `clearcoatRoughness`、テクスチャは R / G。clearcoatNormal は警告）
 - `options.onWarning`: 未対応拡張、POINTS / LINES、POSITION なし、アニメーション / スキン / カメラ / モーフ、複数シーン、
   解決できない画像、PNG / JPEG 以外の画像、マテリアルが使う TEXCOORD_n が Mesh にない
 
 ### 未対応（既知）
-- KHR_materials_*、KHR_mesh_quantization（normalized は読めるので一部は動く）
+- KHR_materials_transmission / volume / specular / sheen / unlit など（警告）、KHR_mesh_quantization（normalized は読めるので一部は動く）
 - POINTS / LINES プリミティブ（スキップして警告）
 - アニメーション、スキン、モーフターゲット、カメラ、ライト
 - 外部ファイル参照の `.gltf`（`uri` が data: 以外だと throw）
@@ -115,7 +117,9 @@ npm run demo                               # 見た目の確認: サンプルと
       （glTF の `mesh` が複数ノードから参照される場合のみ。`options.instancing: false` で従来どおり複製）
 - [x] TEXCOORD_1 → `primvars:st1`、`texCoord` フィールドを見てテクスチャごとに `uvReader_st1` を使う（TEXCOORD_n 全般）
 - [x] KHR_texture_transform → `UsdTransform2d` シェーダを `uvReader` と `UsdUVTexture` の間に挟む
-- [ ] KHR_materials_emissive_strength / ior / clearcoat / transmission（UsdPreviewSurface に対応する入力があるもののみ）
+- [x] KHR_materials_emissive_strength / ior / clearcoat（UsdPreviewSurface に対応する入力があるもののみ）
+- [ ] KHR_materials_transmission: UsdPreviewSurface に対応入力がないので現状は警告のみ。`opacity = 1 - transmission` で
+      近似するかは要相談（ガラスが消えて見える副作用がある）
 - [x] sampler の wrapS/wrapT（REPEAT / CLAMP_TO_EDGE / MIRRORED_REPEAT → `repeat` / `clamp` / `mirror`）
 - [ ] 外部 `.gltf` 入力（Node なら隣接ファイル、ブラウザなら `File[]` を受け取る resolver を注入）
 - [x] 画像名の衝突回避（同名画像が複数ある場合）。大文字小文字を区別せずに比較

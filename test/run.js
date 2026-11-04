@@ -46,7 +46,7 @@ assert(f.usda.includes("@textures/tex.png@") && f.usda.includes("@textures/tex_1
 const matA = f.usda.slice(f.usda.indexOf('def Material "A"'), f.usda.indexOf('def Material "B"'));
 const matB = f.usda.slice(f.usda.indexOf('def Material "B"'), f.usda.indexOf('def Material "C"'));
 const matC = f.usda.slice(f.usda.indexOf('def Material "C"'), f.usda.indexOf('def Material "D"'));
-const matD = f.usda.slice(f.usda.indexOf('def Material "D"'));
+const matD = f.usda.slice(f.usda.indexOf('def Material "D"'), f.usda.indexOf('def Material "E"'));
 assert(matA.includes('token inputs:wrapS = "clamp"') && matA.includes('token inputs:wrapT = "mirror"'), "CLAMP_TO_EDGE / MIRRORED_REPEAT");
 assert(matB.includes('token inputs:wrapS = "repeat"') && matB.includes('token inputs:wrapT = "repeat"'), "default sampler = repeat");
 
@@ -66,6 +66,19 @@ assert(matD.includes("float2 inputs:scale = (1.5, 0.75)"), "scale");
 // translation = (0.25 + sin(0.5) * 0.75, 1 - 0.1 - cos(0.5) * 0.75)
 assert(matD.includes("float2 inputs:translation = (0.6095692, 0.2418131)"), "translation converted to USD st space");
 assert(!matA.includes("UsdTransform2d"), "no transform without the extension");
+
+// KHR_materials_* with UsdPreviewSurface inputs.
+const matE = f.usda.slice(f.usda.indexOf('def Material "E"'));
+assert(matE.includes("color3f inputs:emissiveColor = (1, 0.5, 0)"), "emissive_strength multiplies emissiveFactor");
+assert(matE.includes("float inputs:ior = 1.33"), "ior");
+assert(matE.includes("float inputs:clearcoat = 0.8"), "clearcoat factor");
+assert(matE.includes("float inputs:clearcoatRoughness.connect = </Root/Materials/E/Texture_clearcoatRoughness.outputs:g>"), "clearcoat roughness texture (G)");
+assert(matE.includes("float4 inputs:scale = (0.5, 0.5, 0.5, 1)"), "clearcoat roughness factor as texture scale");
+assert(!matD.includes("inputs:ior") && !matD.includes("clearcoat"), "no ior / clearcoat without the extensions");
+assert(warnings.some((w) => w.includes("KHR_materials_transmission")), "transmission is reported as unsupported");
+for (const e of ["emissive_strength", "KHR_materials_ior", "KHR_materials_clearcoat"]) {
+  assert(!warnings.some((w) => w.includes(e)), `no warning for supported ${e}`);
+}
 
 // Warnings: unsupported extension, skipped LINES primitive; each reported once.
 assert(warnings.some((w) => w.includes("KHR_materials_unlit")), "warns about unsupported extension");

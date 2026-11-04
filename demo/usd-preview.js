@@ -286,10 +286,23 @@ export function buildUsdScene(layer, entries) {
       mat.emissive.fromArray(emissive.value);
     }
 
+    // three.js reads clearcoat from R and clearcoatRoughness from G, like glTF.
     const clearcoat = input("clearcoat");
-    if (typeof clearcoat?.value === "number") mat.clearcoat = clearcoat.value;
+    if (clearcoat?.texture) {
+      if (clearcoat.channel !== "r") warn(`clearcoat がチャンネル ${clearcoat.channel} に接続（three.js は R を使う）`);
+      mat.clearcoatMap = clearcoat.texture;
+      mat.clearcoat = clearcoat.scale[channelIndex(clearcoat.channel)];
+    } else if (typeof clearcoat?.value === "number") {
+      mat.clearcoat = clearcoat.value;
+    }
     const ccr = input("clearcoatRoughness");
-    if (typeof ccr?.value === "number") mat.clearcoatRoughness = ccr.value;
+    if (ccr?.texture) {
+      if (ccr.channel !== "g") warn(`clearcoatRoughness がチャンネル ${ccr.channel} に接続（three.js は G を使う）`);
+      mat.clearcoatRoughnessMap = ccr.texture;
+      mat.clearcoatRoughness = ccr.scale[channelIndex(ccr.channel)];
+    } else if (typeof ccr?.value === "number") {
+      mat.clearcoatRoughness = ccr.value;
+    }
     const ior = input("ior");
     if (typeof ior?.value === "number") mat.ior = ior.value;
 
