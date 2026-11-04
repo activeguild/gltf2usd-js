@@ -295,15 +295,22 @@ export function skinningPrimvars(ctx, plan, prim, vertexCount, meshName) {
   const elementSize = sets.length * 4;
   const indices = new Array(vertexCount * elementSize);
   const weights = new Array(vertexCount * elementSize);
+  const slots = [];
   for (let v = 0; v < vertexCount; v++) {
-    sets.forEach(([J, W], s) => {
+    slots.length = 0;
+    sets.forEach(([J, W]) => {
       for (let c = 0; c < 4; c++) {
-        const o = v * elementSize + s * 4 + c;
         const w = W[v * 4 + c];
         // Zero-weight slots may hold any index; point them at joint 0.
-        indices[o] = w ? plan.remap[J[v * 4 + c]] ?? 0 : 0;
-        weights[o] = w;
+        slots.push([w ? plan.remap[J[v * 4 + c]] ?? 0 : 0, w]);
       }
+    });
+    // Heaviest influence first (stable). glTF allows any order, but Quick Look does not play
+    // a skin whose vertices start with a zero-weight slot (under test).
+    slots.sort((a, b) => b[1] - a[1]);
+    slots.forEach(([j, w], i) => {
+      indices[v * elementSize + i] = j;
+      weights[v * elementSize + i] = w;
     });
   }
   return { indices, weights, elementSize };
