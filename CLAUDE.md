@@ -174,6 +174,8 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
    同じ名前をメッシュや `/Root/Scene` のノードに付けても問題はない。ほかに再生を妨げる名前があるかは不明なので、glTF のスキン名は
    そのまま使わない。各頂点のウェイトを重い順に並べるのは、この調査の途中で入れた変更で、Quick Look の再生には無関係だった
    （変形は変わらないので残している）。
+   この 16〜18 の出力（USDA ルートの USDZ）は、iOS の AR Quick Look でもスキン・ノードアニメーションとも再生されることを確認済み。
+   Reality Converter だけはルートレイヤーが USDC でないと受け付けない（段階 5、issue #1）。
 
 
 ## OpenUSD バリデータに指摘されて直した点（再発注意）
