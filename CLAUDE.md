@@ -16,9 +16,11 @@ Khronos サンプル（BoxTextured / CesiumMilkTruck / DamagedHelmet）を OpenU
 | ファイル | 役割 | 備考 |
 |---|---|---|
 | `src/glb.js`  | `parseGLB()`, `GltfAsset` | accessor デコード（byteStride / normalized / sparse 対応）、`imageBytes()` |
-| `src/usda.js` | `gltfToUsda(asset, opts)` → `{ usda, files }` | ノード階層、Mesh、UsdPreviewSurface |
+| `src/convert.js` | `gltfToStage(asset, opts)` → `{ layer, files }`（glTF → USD IR） | ノード階層、Mesh、UsdPreviewSurface、警告 |
+| `src/ir.js` | `Layer` / `Prim`（`attr()` / `rel()` / `child()`） | USD 側のプリム・属性ツリー。値の表現規約は冒頭コメント |
+| `src/usda.js` | `writeUsda(layer)` → USDA 文字列 | 型名から書式を決める。timeSamples 対応 |
 | `src/usdz.js` | `packUsdz(entries)` → `Uint8Array` | stored-only zip、64 バイトアライン、CRC32 自前 |
-| `src/index.js`| `glbToUsda()`, `glbToUsdz()` | 公開 API。名前は glb だが `.gltf` も受け付ける |
+| `src/index.js`| `glbToUsda()`, `glbToUsdz()`, `gltfToUsda()` | 公開 API。名前は glb だが `.gltf` も受け付ける |
 | `cli.js`      | `node cli.js in.glb\|in.gltf out.usdz\|out.usda` | `.gltf` の外部ファイルは同じフォルダ以下からのみ読む |
 | `test/cube-glb.js` | テスト用 GLB をメモリ上で生成（Node / ブラウザ共用） | `buildCubeGlb()`（段階 1）、`buildFeatureGlb()`（段階 2 の機能） |
 | `test/make-glb.js` | `test/cube.glb`、`test/features.glb`、`test/gltf/`（外部ファイル付き .gltf）を書き出す | |
@@ -69,9 +71,9 @@ Khronos サンプル（BoxTextured / CesiumMilkTruck / DamagedHelmet）を OpenU
 
 ## 重要な設計判断（変えるときは理由を README にも書くこと）
 
-1. **中間表現を挟まない方針でスタートしている。** 今は glTF JSON を直接走査して USDA 文字列を組み立てている。
-   段階 3（アニメーション）か段階 5（USDC）で USD 側のプリム/属性ツリーを表す IR が必要になるはず。
-   その時点で `usda.js` を「glTF → USD IR」と「USD IR → usda 文字列」に分割する。USDC writer は同じ IR から書く。
+1. **glTF → USD IR → テキストの 2 段構成。**（段階 3 の頭で分割済み。分割前後で全サンプルの出力がバイト単位で一致することを確認）
+   `convert.js` は USD の書式を知らず、`usda.js` は glTF を知らない。USDC writer（段階 5）も同じ IR から書く。
+   IR の値はフラットな配列（タプルも平坦化）、型は `typeName` 文字列で持つ。
 2. **座標変換はしない。** glTF と USD は両方 Y-up・右手系・メートル。UV の V だけ `1 - v` で反転する。
 3. **行列はそのまま書く。** glTF の column-major 16 要素を 4 要素ずつ 4 行で書くと USD の row-vector 規約に一致する
    （平行移動が最終行）。転置してはいけない。

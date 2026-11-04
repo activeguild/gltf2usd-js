@@ -1,9 +1,17 @@
 // Public API: works in browsers and Node (ESM).
 import { parseGLB, parseGltf, GltfAsset, resolveResource } from "./glb.js";
-import { gltfToUsda } from "./usda.js";
+import { gltfToStage } from "./convert.js";
+import { writeUsda } from "./usda.js";
 import { packUsdz } from "./usdz.js";
+import { Layer, Prim } from "./ir.js";
 
-export { parseGLB, parseGltf, GltfAsset, resolveResource, gltfToUsda, packUsdz };
+export { parseGLB, parseGltf, GltfAsset, resolveResource, gltfToStage, writeUsda, packUsdz, Layer, Prim };
+
+/** GltfAsset → { usda, files }: gltfToStage (glTF → USD IR) followed by writeUsda (IR → text). */
+export function gltfToUsda(asset, options = {}) {
+  const { layer, files } = gltfToStage(asset, options);
+  return { usda: writeUsda(layer), files };
+}
 
 /**
  * glTF → { usda: string, files: {name, bytes}[] }
