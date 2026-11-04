@@ -28,6 +28,9 @@ export function gltfToUsda(asset, options = {}) {
  *   to a prototype under /Root/Meshes (default true; false duplicates them).
  * options.animation: index or name of the glTF animation to convert (default 0).
  *   USD has one timeline, so only one animation is written.
+ * options.animationMode: "skeleton" (default) writes node animation as UsdSkel
+ *   (animated subtrees become joints, meshes bound rigidly), which AR Quick Look-style
+ *   viewers play; "xform" writes time-sampled translate / orient / scale xformOps.
  */
 export function glbToUsda(input, options = {}) {
   const asset = new GltfAsset(parseInput(input), { resources: options.resources });

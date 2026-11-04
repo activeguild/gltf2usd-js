@@ -30,11 +30,8 @@ import { DataUnavailableError } from "./glb.js";
  * @property {number[][]} prefix    static matrix in front of each joint's local transform
  * @property {number[]} users       scene nodes that use the skin (mesh goes into the SkelRoot)
  */
-export function planSkins(ctx, sceneNodes) {
-  const { json } = ctx;
-  const plans = new Map();
-  if (!json.skins?.length) return plans;
-
+/** Parent map and cached rest-pose world matrices for all nodes. */
+function nodeGraph(json) {
   const parent = new Map();
   (json.nodes || []).forEach((n, i) => (n.children || []).forEach((c) => parent.set(c, i)));
   const worldCache = new Map();
@@ -43,6 +40,14 @@ export function planSkins(ctx, sceneNodes) {
     if (!worldCache.has(i)) worldCache.set(i, multiply(world(parent.get(i)), nodeLocalMatrix(json.nodes[i])));
     return worldCache.get(i);
   };
+  return { parent, world };
+}
+
+export function planSkins(ctx, sceneNodes) {
+  const { json } = ctx;
+  const plans = new Map();
+  if (!json.skins?.length) return plans;
+  const { parent, world } = nodeGraph(json);
 
   for (const nodeIndex of sceneNodes) {
     const node = json.nodes[nodeIndex];
@@ -64,19 +69,23 @@ export function planSkins(ctx, sceneNodes) {
   return plans;
 }
 
-function buildPlan(ctx, skinIndex, skin, parent, world) {
+/**
+ * Joint hierarchy for a set of nodes: parent-first order (UsdSkel requires parents
+ * before children; siblings keep `jointList` order), path tokens, and for each joint
+ * the static matrix between its parent joint (or the skeleton origin) and its own
+ * local transform: prefix_k = inverse(world(parentJoint)) · world(direct parent).
+ */
+function jointHierarchy(ctx, jointList, parent, world, label) {
   const { json } = ctx;
-  const jointSet = new Set(skin.joints);
+  const jointSet = new Set(jointList);
   const parentJoint = (j) => {
     let p = parent.get(j);
     while (p !== undefined && !jointSet.has(p)) p = parent.get(p);
     return p;
   };
-
-  // Parent-first order (UsdSkel requires parents before children); siblings keep skin order.
   const children = new Map();
   const roots = [];
-  for (const j of skin.joints) {
+  for (const j of jointList) {
     const p = parentJoint(j);
     if (p === undefined) roots.push(j);
     else (children.get(p) ?? children.set(p, []).get(p)).push(j);
@@ -94,6 +103,22 @@ function buildPlan(ctx, skinIndex, skin, parent, world) {
   const rootNames = new Set();
   roots.forEach((r) => visit(r, "", rootNames));
 
+  const animatedNodes = ctx.animation?.nodes;
+  const prefix = joints.map((j) => {
+    const pj = parentJoint(j);
+    const direct = parent.get(j);
+    for (let a = direct; a !== undefined && a !== pj; a = parent.get(a)) {
+      if (animatedNodes?.has(a)) {
+        ctx.warn(`${label}: node ${a} between joints is animated; its animation is not applied to the skeleton`);
+      }
+    }
+    return pj === direct ? [...IDENTITY] : multiply(invert(world(pj)), world(direct));
+  });
+  return { joints, tokens, prefix };
+}
+
+function buildPlan(ctx, skinIndex, skin, parent, world) {
+  const { joints, tokens, prefix } = jointHierarchy(ctx, skin.joints, parent, world, `Skin ${skinIndex}`);
   const skelIndex = new Map(joints.map((j, k) => [j, k]));
   const remap = Int32Array.from(skin.joints, (j) => skelIndex.get(j));
 
@@ -104,22 +129,55 @@ function buildPlan(ctx, skinIndex, skin, parent, world) {
     return ibm ? invert(Array.from(ibm.slice(i * 16, i * 16 + 16))) : [...IDENTITY];
   });
 
-  // prefix_k = inverse(world(parentJoint)) · world(direct parent): the static part between
-  // the parent joint (or the skeleton origin) and the joint's own local transform.
-  const animatedNodes = ctx.animation?.nodes;
-  const prefix = joints.map((j) => {
-    const pj = parentJoint(j);
-    const direct = parent.get(j);
-    for (let a = direct; a !== undefined && a !== pj; a = parent.get(a)) {
-      if (animatedNodes?.has(a)) {
-        ctx.warn(`Skin ${skinIndex}: node ${a} between joints is animated; its animation is not applied to the skeleton`);
-      }
-    }
-    return pj === direct ? [...IDENTITY] : multiply(invert(world(pj)), world(direct));
-  });
-
   const name = uniqueName(sanitize(skin.name, `Skin_${skinIndex}`), ctx.skinNames);
   return { index: skinIndex, name, joints, tokens, remap, bind, prefix, users: [] };
+}
+
+/**
+ * Node (transform) animation as skeletal animation. Some viewers (verified with AR
+ * Quick Look-style playback) do not play time-sampled xformOps but do play UsdSkel,
+ * so every animated node and its whole subtree become joints of one Skeleton, and
+ * the meshes in those subtrees are bound rigidly (one joint, weight 1) to their node's
+ * joint — the same approach as Apple's usdzconvert `bindRigidDeformation`.
+ *
+ * bindTransforms are the joints' rest world matrices; each mesh gets its node's rest
+ * world matrix as geomBindTransform, so  jointSkel(t) · inverse(bind) · geomBind = jointSkel(t).
+ *
+ * @param {Set<number>} exclude  nodes that are already handled (skin joints)
+ * @returns {null | SkinPlan & { rigid: true, roots: Set<number> }}
+ */
+export function planRigidAnimation(ctx, sceneNodes, exclude) {
+  const animated = ctx.animation?.nodes;
+  if (!animated?.size) return null;
+  const { json } = ctx;
+  const { parent, world } = nodeGraph(json);
+  const inScene = new Set(sceneNodes);
+  const isAnimated = (i) => inScene.has(i) && !exclude.has(i) &&
+    ["translation", "rotation", "scale"].some((p) => animated.get(i)?.[p]);
+  const roots = sceneNodes.filter((i) => {
+    if (!isAnimated(i)) return false;
+    for (let a = parent.get(i); a !== undefined; a = parent.get(a)) if (isAnimated(a)) return false;
+    return true;
+  });
+  if (!roots.length) return null;
+
+  const jointList = [];
+  const collect = (i) => {
+    if (jointList.includes(i)) return;
+    jointList.push(i);
+    for (const c of json.nodes[i].children || []) collect(c);
+  };
+  roots.forEach(collect);
+  const { joints, tokens, prefix } = jointHierarchy(ctx, jointList, parent, world, "Animation");
+  const bind = joints.map((j) => world(j));
+  const users = joints.filter((j) => json.nodes[j].mesh !== undefined);
+  const name = uniqueName("Animated", ctx.skinNames);
+  return { index: -1, name, joints, tokens, remap: null, bind, prefix, users, rigid: true, roots: new Set(roots) };
+}
+
+/** Rigid binding of a mesh to joint `k`: constant jointIndices / weights, geomBind = rest world. */
+export function rigidPrimvars(plan, k) {
+  return { indices: [k], weights: [1], elementSize: 1, constant: true, geomBind: plan.bind[k] };
 }
 
 /** Joint-local (relative to parent joint) T / R / S at a time code (undefined = rest pose). */

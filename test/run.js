@@ -137,11 +137,11 @@ assert(f.usda.includes('def Mesh "CubeC"') && f.usda.includes('def Xform "CubeC_
   assert(notGltf?.message.includes("neither a GLB nor glTF"), "garbage input error");
 }
 
-// ---- Stage 3: animation (test/animated.glb) ----
+// ---- Stage 3: animation as xformOp timeSamples (animationMode: "xform") ----
 {
   const animGlb = readFileSync(new URL("./animated.glb", import.meta.url));
   const w = [];
-  const a = glbToUsda(animGlb, { onWarning: (m) => w.push(m) }).usda;
+  const a = glbToUsda(animGlb, { onWarning: (m) => w.push(m), animationMode: "xform" }).usda;
   const block = (name) => a.slice(a.indexOf(`def Xform "${name}"`), a.indexOf("xformOpOrder", a.indexOf(`def Xform "${name}"`)));
   for (const [k, v] of [["startTimeCode", 0], ["endTimeCode", 48], ["timeCodesPerSecond", 24], ["framesPerSecond", 24]]) {
     assert(a.includes(`    ${k} = ${v}\n`), `layer ${k} = ${v}`);
@@ -165,8 +165,36 @@ assert(f.usda.includes('def Mesh "CubeC"') && f.usda.includes('def Xform "CubeC_
   assert(w.some((m) => m.includes('only animation "Main"') && m.includes("Unused")), "warns about skipped animations");
   assert(w.some((m) => m.includes("weights")), "warns about weights channel");
   // options.animation selects another clip.
-  const unused = glbToUsda(animGlb, { animation: "Unused" }).usda;
+  const unused = glbToUsda(animGlb, { animation: "Unused", animationMode: "xform" }).usda;
   assert(unused.includes('def Xform "Spin"') && !unused.includes("xformOp:orient.timeSamples") && unused.includes("double3 xformOp:translate.timeSamples"), "options.animation by name");
+}
+
+// ---- Node animation as skeletal animation (default animationMode: "skeleton") ----
+{
+  const animGlb = readFileSync(new URL("./animated.glb", import.meta.url));
+  const s = glbToUsda(animGlb).usda;
+  const skelRoot = s.slice(s.indexOf('def SkelRoot "Animated"'), s.indexOf('def Scope "Materials"'));
+  assert(s.includes('kind = "component"'), "root prim is a component model");
+  assert(skelRoot && !s.slice(s.indexOf('def Xform "Scene"'), s.indexOf('def SkelRoot "Animated"')).includes("Slide"), "animated nodes leave /Root/Scene");
+  assert(skelRoot.includes('uniform token[] joints = ["Slide", "Spin", "Pulse", "Bounce"]'), "one joint per animated node");
+  assert(skelRoot.includes("rel skel:animationSource = </Root/Animated/Animation>") && skelRoot.includes("quatf[] rotations.timeSamples"), "SkelAnimation drives the joints");
+  assert(count(skelRoot, 'interpolation = "constant"') === 8 && skelRoot.includes("primvars:skel:jointIndices = [3]"), "meshes bound rigidly (constant joint index)");
+  assert(skelRoot.includes("matrix4d primvars:skel:geomBindTransform = ( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (4.5, 0, 0, 1) )"), "geomBind = node rest world");
+  assert(!s.includes("xformOp:translate.timeSamples") && !s.includes("instanceable"), "no xformOp animation, no instancing of animated meshes");
+}
+
+// ---- glTF defaults: flat normals and the default material ----
+{
+  const { gltf, resources } = buildCubeGltf();
+  const j = JSON.parse(gltf);
+  delete j.meshes[0].primitives[0].attributes.NORMAL;
+  delete j.meshes[0].primitives[0].material;
+  const d = glbToUsda(j, { resources }).usda;
+  assert(d.includes('interpolation = "faceVarying"') && d.includes("normal3f[] normals = [(0, 0, 1), (0, 0, 1), (0, 0, 1),"), "flat normals when NORMAL is missing");
+  assert(d.includes("rel material:binding = </Root/Materials/DefaultMaterial>") && d.includes('def Material "DefaultMaterial"'), "default material bound");
+  const dm = d.slice(d.indexOf('def Material "DefaultMaterial"'));
+  assert(dm.includes("color3f inputs:diffuseColor = (1, 1, 1)") && dm.includes("float inputs:metallic = 1") && dm.includes("float inputs:roughness = 1"), "glTF default material values");
+  assert(!usda.includes("DefaultMaterial"), "no default material when every primitive has one");
 }
 
 // ---- Stage 4: skins and morph targets (test/skinned.glb) ----
@@ -190,7 +218,7 @@ assert(f.usda.includes('def Mesh "CubeC"') && f.usda.includes('def Xform "CubeC_
   assert(skel.includes("rel skel:animationSource = </Root/Skins/Rig/Animation>"), "animation source");
   // Joint indices remapped to skeleton order; zero-weight slots point at joint 0.
   assert(bar.includes("primvars:skel:jointIndices = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0,"), "jointIndices remapped");
-  assert(bar.includes("elementSize = 4") && bar.includes('prepend apiSchemas = ["SkelBindingAPI"]'), "elementSize / SkelBindingAPI");
+  assert(bar.includes("elementSize = 4") && bar.includes('prepend apiSchemas = ["SkelBindingAPI", "MaterialBindingAPI"]'), "elementSize / SkelBindingAPI (+ default material)");
   assert(bar.includes("rel skel:skeleton = </Root/Skins/Rig/Skeleton>"), "mesh bound to skeleton");
   assert(!section('def Xform "BarNode"', 'def Xform "Blob"', 0).includes("def Mesh"), "skinned mesh is not left under its node");
   // Sparse morph target on the skinned mesh, driven by the shared SkelAnimation.

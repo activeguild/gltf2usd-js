@@ -15,7 +15,7 @@ import { composeTRS } from "./math.js";
 
 export { sanitize };
 import { evaluateAnimation, TIME_CODES_PER_SECOND } from "./animation.js";
-import { planSkins, buildSkeleton, skinningPrimvars, NO_JOINTS } from "./skin.js";
+import { planSkins, buildSkeleton, skinningPrimvars, NO_JOINTS, planRigidAnimation, rigidPrimvars } from "./skin.js";
 import { addBlendShapes, meshHasTargets, restWeights } from "./morph.js";
 
 const MODE_NAMES = ["POINTS", "LINES", "LINE_LOOP", "LINE_STRIP", "TRIANGLES", "TRIANGLE_STRIP", "TRIANGLE_FAN"];
@@ -79,7 +79,8 @@ export function gltfToStage(asset, options = {}) {
       framesPerSecond: TIME_CODES_PER_SECOND,
     });
   }
-  const root = layer.add(new Prim("Xform", "Root", { spaced: true }));
+  // kind = component, like Apple's usdzconvert (an asset that is a single model).
+  const root = layer.add(new Prim("Xform", "Root", { spaced: true, metadata: { kind: "component" } }));
 
   // Scene / node hierarchy
   const scene = ctx.json.scenes?.[ctx.json.scene ?? 0];
@@ -88,6 +89,12 @@ export function gltfToStage(asset, options = {}) {
   ctx.skinNames = new Set();
   ctx.skins = planSkins(ctx, sceneNodes);
   ctx.skinnedNodes = new Set([...ctx.skins.values()].flatMap((p) => p.users));
+  // Node animation as skeletal animation (default) or time-sampled xformOps.
+  const animationMode = options.animationMode ?? "skeleton";
+  if (animationMode !== "skeleton" && animationMode !== "xform") throw new Error(`Unknown animationMode "${animationMode}"`);
+  const skinJoints = new Set([...ctx.skins.values()].flatMap((p) => p.joints));
+  ctx.rigid = animationMode === "skeleton" ? planRigidAnimation(ctx, sceneNodes, skinJoints) : null;
+  ctx.rigidNodes = new Set(ctx.rigid?.joints ?? []);
   ctx.prototypes = planPrototypes(ctx, sceneNodes, options.instancing ?? true);
   const scenePrim = root.child(new Prim("Xform", "Scene"));
   const usedNames = new Set();
@@ -110,6 +117,25 @@ export function gltfToStage(asset, options = {}) {
     }
   }
 
+  // Animated node subtrees: one SkelRoot whose Skeleton has a joint per node; meshes
+  // are bound rigidly to their node's joint (see planRigidAnimation).
+  if (ctx.rigid) {
+    const plan = ctx.rigid;
+    const skelRoot = root.child(new Prim("SkelRoot", plan.name));
+    const skelRootPath = `/Root/${plan.name}`;
+    const shapes = [];
+    const names = new Set(["Skeleton", "Animation"]);
+    plan.joints.forEach((j, k) => {
+      const node = ctx.json.nodes[j];
+      if (node.extensions?.KHR_lights_punctual) ctx.warn(`Node ${j}: lights under animated nodes are not supported with skeletal animation; skipped`);
+      if (node.mesh === undefined || ctx.skinnedNodes.has(j)) return;
+      if (node.extensions?.EXT_mesh_gpu_instancing) ctx.warn(`Node ${j}: EXT_mesh_gpu_instancing under an animated node is drawn once`);
+      buildMeshPrims(ctx, skelRoot, node.mesh, names, { plan, rigidJoint: k, skelRootPath, shapes, node: j });
+    });
+    buildSkeleton(ctx, plan, skelRoot, skelRootPath, shapes, (nd) => restWeights(ctx, nd));
+    skelPrimsFirst(skelRoot);
+  }
+
   // Prototypes for meshes shared by several nodes. `class` keeps them out of
   // the rendered scene; nodes reference them as instanceable prims.
   if (ctx.prototypes.size) {
@@ -121,9 +147,10 @@ export function gltfToStage(asset, options = {}) {
 
   // Materials
   const materials = ctx.json.materials || [];
-  if (materials.length) {
+  if (materials.length || ctx.defaultMaterialName) {
     const scope = root.child(new Prim("Scope", "Materials"));
     materials.forEach((mat, i) => buildMaterial(ctx, scope, mat, i));
+    if (ctx.defaultMaterialName) buildDefaultMaterial(scope, ctx.defaultMaterialName);
   }
   buildMaterialVariants(ctx, root);
 
@@ -157,6 +184,8 @@ function reportUnsupported(ctx) {
 // ---------- Nodes ----------
 
 function buildNode(ctx, parent, nodeIndex, siblingNames, parentPath) {
+  // Animated subtrees live in the skeletal-animation SkelRoot instead.
+  if (ctx.rigid?.roots.has(nodeIndex)) return;
   const node = ctx.json.nodes[nodeIndex];
   const name = uniqueName(sanitize(node.name, `Node_${nodeIndex}`), siblingNames);
   const path = `${parentPath}/${name}`;
@@ -394,8 +423,8 @@ function planPrototypes(ctx, sceneNodes, enabled) {
   const uses = new Map();
   for (const i of sceneNodes) {
     const node = ctx.json.nodes[i];
-    // Skinned and morphed meshes are bound per node, so they are not instanced.
-    if (node.mesh === undefined || ctx.skinnedNodes.has(i) || meshHasTargets(ctx.json.meshes[node.mesh])) continue;
+    // Skinned, morphed and rigidly animated meshes are bound per node, so they are not instanced.
+    if (node.mesh === undefined || ctx.skinnedNodes.has(i) || ctx.rigidNodes.has(i) || meshHasTargets(ctx.json.meshes[node.mesh])) continue;
     uses.set(node.mesh, (uses.get(node.mesh) ?? 0) + gpuInstanceCount(ctx, node));
   }
   const used = new Set();
@@ -486,10 +515,15 @@ function buildMeshPrimData(ctx, parent, prim, name, skel, gltfMesh) {
   const hasMaterial = prim.material !== undefined && ctx.json.materials?.[prim.material];
   // A primitive whose material only comes from KHR_materials_variants still needs the binding API.
   const variantMapped = !!prim.extensions?.KHR_materials_variants?.mappings?.length;
-  const skinning = skel?.plan ? skinningPrimvars(ctx, skel.plan, prim, pos.count, name) : null;
+  const skinning = !skel?.plan ? null
+    : skel.rigidJoint !== undefined ? rigidPrimvars(skel.plan, skel.rigidJoint)
+    : skinningPrimvars(ctx, skel.plan, prim, pos.count, name);
+  // glTF's default material applies to primitives without one (vertex colors keep displayColor).
+  const useDefaultMaterial = !hasMaterial && !variantMapped && attrs.COLOR_0 === undefined;
+  if (useDefaultMaterial) ctx.defaultMaterialName ??= defaultMaterialName(ctx);
   const hasShapes = !!(skel && prim.targets?.length);
   const skelBound = !!(skinning || hasShapes);
-  const apiSchemas = [...(skelBound ? ["SkelBindingAPI"] : []), ...(hasMaterial || variantMapped ? ["MaterialBindingAPI"] : [])];
+  const apiSchemas = [...(skelBound ? ["SkelBindingAPI"] : []), ...(hasMaterial || variantMapped || useDefaultMaterial ? ["MaterialBindingAPI"] : [])];
   const mesh = parent.child(new Prim("Mesh", name, {
     metadata: apiSchemas.length ? { "prepend apiSchemas": apiSchemas } : {},
   }));
@@ -501,6 +535,9 @@ function buildMeshPrimData(ctx, parent, prim, name, skel, gltfMesh) {
   const vertex = { interpolation: "vertex" };
   if (attrs.NORMAL !== undefined) {
     mesh.attr("normal3f[]", "normals", ctx.asset.accessor(attrs.NORMAL).data, { metadata: vertex });
+  } else {
+    // glTF: without NORMAL, clients must use flat normals (one per triangle corner here).
+    mesh.attr("normal3f[]", "normals", flatNormals(pos.data, indices), { metadata: { interpolation: "faceVarying" } });
   }
 
   // TEXCOORD_n → primvars:st / st1 / st2 ...
@@ -532,10 +569,10 @@ function buildMeshPrimData(ctx, parent, prim, name, skel, gltfMesh) {
   mesh.attr("float3[]", "extent", extentOf(pos.data));
 
   if (skinning) {
-    const meta = { elementSize: skinning.elementSize, interpolation: "vertex" };
+    const meta = { elementSize: skinning.elementSize, interpolation: skinning.constant ? "constant" : "vertex" };
     mesh.attr("int[]", "primvars:skel:jointIndices", skinning.indices, { metadata: meta });
     mesh.attr("float[]", "primvars:skel:jointWeights", skinning.weights, { metadata: meta });
-    mesh.attr("matrix4d", "primvars:skel:geomBindTransform", [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+    mesh.attr("matrix4d", "primvars:skel:geomBindTransform", skinning.geomBind ?? [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
   }
   if (hasShapes) {
     const shapes = addBlendShapes(ctx, mesh, `${skel.skelRootPath}/${name}`, gltfMesh, prim, pos.count);
@@ -543,12 +580,52 @@ function buildMeshPrimData(ctx, parent, prim, name, skel, gltfMesh) {
   }
   if (skelBound) mesh.rel("skel:skeleton", `${skel.skelRootPath}/Skeleton`);
 
+  if (useDefaultMaterial) mesh.rel("material:binding", `/Root/Materials/${ctx.defaultMaterialName}`);
   if (hasMaterial) {
     // Variant-mapped primitives get their binding from the variantSet only: a binding
     // authored here (a local opinion) would be stronger than any variant's.
     if (!variantMapped) mesh.rel("material:binding", `/Root/Materials/${uniqueMaterialName(ctx, prim.material)}`);
     if (ctx.json.materials[prim.material].doubleSided) mesh.attr("bool", "doubleSided", true, { uniform: true });
   }
+}
+
+/** Per-corner normals of each triangle (faceVarying), for primitives without NORMAL. */
+function flatNormals(p, indices) {
+  const out = new Array(indices.length * 3);
+  for (let t = 0; t < indices.length; t += 3) {
+    const [a, b, c] = [indices[t] * 3, indices[t + 1] * 3, indices[t + 2] * 3];
+    const ux = p[b] - p[a], uy = p[b + 1] - p[a + 1], uz = p[b + 2] - p[a + 2];
+    const vx = p[c] - p[a], vy = p[c + 1] - p[a + 1], vz = p[c + 2] - p[a + 2];
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const len = Math.hypot(nx, ny, nz) || 1;
+    nx /= len; ny /= len; nz /= len;
+    for (let k = 0; k < 3; k++) {
+      out[(t + k) * 3] = nx;
+      out[(t + k) * 3 + 1] = ny;
+      out[(t + k) * 3 + 2] = nz;
+    }
+  }
+  return out;
+}
+
+/** Name for glTF's default material that does not collide with the file's materials. */
+function defaultMaterialName(ctx) {
+  uniqueMaterialName(ctx, 0); // make sure the cache of glTF material names exists
+  return uniqueName("DefaultMaterial", new Set(ctx._matNameCache ?? []));
+}
+
+/** glTF's default material: base color 1, metallic 1, roughness 1. */
+function buildDefaultMaterial(scope, name) {
+  const path = `/Root/Materials/${name}`;
+  const material = scope.child(new Prim("Material", name, { spaced: true }));
+  material.attr("token", "outputs:surface", undefined, { connect: `${path}/PreviewSurface.outputs:surface` });
+  const surface = material.child(new Prim("Shader", "PreviewSurface"));
+  surface.attr("token", "info:id", "UsdPreviewSurface", { uniform: true });
+  surface.attr("int", "inputs:useSpecularWorkflow", 0);
+  surface.attr("color3f", "inputs:diffuseColor", [1, 1, 1]);
+  surface.attr("float", "inputs:metallic", 1);
+  surface.attr("float", "inputs:roughness", 1);
+  surface.attr("token", "outputs:surface");
 }
 
 function buildTriangleIndices(ctx, prim, mode, vertexCount) {

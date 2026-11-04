@@ -68,13 +68,18 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
 - TRIANGLES / STRIP / FAN、インデックス有無
 - POSITION / NORMAL / TEXCOORD_0（V 反転）/ COLOR_0（`primvars:displayColor`）
 - `extent`、`prepend apiSchemas = ["MaterialBindingAPI"]`、`doubleSided`
+- glTF の既定: NORMAL がなければ flat normals（faceVarying）、マテリアルがなければ `DefaultMaterial`（白、metallic 1、roughness 1。
+  COLOR_0 があるときは displayColor を活かすため付けない）。`/Root` に `kind = "component"`
 - マテリアル: baseColor factor/texture、metallicRoughness、normal、occlusion、emissive、alphaMode BLEND/MASK
 - テクスチャ（PNG / JPEG）の USDZ 同梱（`textures/<name>.<ext>`、同名は `<name>_1.<ext>`）
 - sampler の wrapS / wrapT
 - TEXCOORD_n → `primvars:st` / `st1` / `st2` …、テクスチャの `texCoord` ごとに `uvReader_st<n>`
 - KHR_texture_transform → `Transform2d_<slot>`（`UsdTransform2d`）。`texCoord` の上書きにも対応
 - 複数ノードで共有されるメッシュ → `class Xform "Meshes"` 下のプロトタイプ + `instanceable` な internal reference
-- アニメーション（1 本）: translation / rotation / scale → `xformOp:translate` / `orient` / `scale` の timeSamples。
+- **ノードアニメーションは既定でスケルトンに変換**（`animationMode: "skeleton"`）: 動くノードとその子孫を 1 つの Skeleton の
+  ジョイントにし、`/Root/Animated`（SkelRoot）にメッシュを移して該当ジョイントに剛体バインド（constant の jointIndices / weights、
+  geomBind = ノードの rest ワールド行列）。下記の設計判断 16
+- `animationMode: "xform"` のときのアニメーション（1 本）: translation / rotation / scale → `xformOp:translate` / `orient` / `scale` の timeSamples。
   LINEAR はそのまま、STEP は次キーの直前（-0.001 timecode）に同値を足して保持、CUBICSPLINE は 24fps + 全キーでベイク。
   `startTimeCode` / `endTimeCode` / `timeCodesPerSecond = framesPerSecond = 24`
 - スキン → `/Root/Skins/<Skin>`（SkelRoot）に Skeleton / SkelAnimation / メッシュ。JOINTS_n / WEIGHTS_n すべて（elementSize = 4n）
@@ -154,6 +159,12 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
    gltf-transform で圧縮した 6 ファイルの全 55 bufferView、およびエンコーダを使ったランダムテスト 81 ケースでバイト一致。
    QUATERNION フィルタは float32 で計算（`Math.fround`）し、.5 ちょうどは 0 から遠い側へ丸める（スカラー版と同じ）。
    SIMD 版（three.js が使う）は偶数丸めなので、ちょうど .5 の値だけ int16 で 1 違う（表示上は無関係）。
+16. **ノードアニメーションは UsdSkel で書く（既定）。** ユーザーの実機ビューア（AR Quick Look 系）で、xformOp の timeSamples は
+   どの書き方（double/float、行列、instancing の有無、USDC）でも再生されず、同じ動きを剛体スケルトンにしたものは再生された。
+   Apple の見本（toy_drummer / hummingbird）もスケルトンのみ。usdzconvert の `bindRigidDeformation` と同じ方式
+   （ただし usdzconvert 自身はノードアニメーションを xformOp で書いている）。OpenUSD 上はどちらも正しく評価される。
+   three.js と OpenUSD の頂点比較で animated.glb / BoxAnimated / CesiumMilkTruck / InterpolationTest が一致（CUBICSPLINE 以外 1e-5 以内）。
+
 
 ## OpenUSD バリデータに指摘されて直した点（再発注意）
 
@@ -186,8 +197,7 @@ npm run demo                               # 見た目の確認: サンプルと
 - **複数アニメーション**: 現状は 1 本（`options.animation`）。`variantSet` で切替にするか、別ノードを動かすクリップは統合するか
   （例: Khronos の InterpolationTest は 9 クリップがそれぞれ別のキューブを動かすので、統合すれば全部入る。Fox は Survey / Walk / Run）
 - **CUBICSPLINE のベイク間隔**: 24fps で最大 3e-3 の誤差。もっと細かくするか
-- **マテリアルなしのプリミティブ**: glTF の既定マテリアル（白、metallic 1、roughness 1）を書いていない。USD 側では未バインド扱いで
-  灰色に見える（段階 1 からの挙動）。既定マテリアルを出力するか
+
 
 - **KHR_lights_punctual の強さ**: UsdLux は単位を規定していないので glTF の lux / candela をそのまま書いている。
   特定のレンダラ（Hydra Storm / RealityKit など）に合わせた換算が要るか

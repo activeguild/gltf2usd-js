@@ -284,10 +284,13 @@ export function buildUsdScene(layer, entries, options = {}) {
     if (sk) {
       const es = ji.metadata.elementSize ?? 1;
       if (es > 4) warn(`${prim.path}: ジョイント影響 ${es} 個のうち、重い順に 4 つだけ表示（three.js の上限）`);
+      // "constant" influences (rigid binding) apply one set to every point.
+      const constant = ji.metadata.interpolation === "constant";
       const perPoint = [];
       for (let p = 0; p < pointCount; p++) {
         const inf = [];
-        for (let c = 0; c < es; c++) inf.push([ji.value[p * es + c], jw.value[p * es + c]]);
+        const base = constant ? 0 : p * es;
+        for (let c = 0; c < es; c++) inf.push([ji.value[base + c], jw.value[base + c]]);
         inf.sort((a, b) => b[1] - a[1]);
         const top = inf.slice(0, 4);
         while (top.length < 4) top.push([0, 0]);

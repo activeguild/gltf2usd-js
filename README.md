@@ -82,7 +82,8 @@ GLB を選ぶかドロップすると（またはサンプルボタンで）、�
 - KHR_lights_punctual → UsdLux（DistantLight / SphereLight / ShapingAPI。強さは近似）
 - EXT_meshopt_compression（依存ゼロの自前デコーダ）
 - Draco（KHR_draco_mesh_compression）は非圧縮 fallback があれば使用、なければスキップして警告
-- アニメーション（1 本）: TRS を `xformOp:translate` / `orient` / `scale` の timeSamples に。LINEAR / STEP / CUBICSPLINE
+- アニメーション（1 本）: 既定ではノードのアニメーションもスケルトン（UsdSkel）に変換（AR Quick Look などは xformOp の
+  アニメーションを再生しないため）。`{ animationMode: "xform" }` で TRS を `xformOp:translate` / `orient` / `scale` の timeSamples に。LINEAR / STEP / CUBICSPLINE
   （STEP は保持サンプル、CUBICSPLINE は 24fps でベイク）。`{ animation: index | name }` で選択
 - スキン → UsdSkel（SkelRoot / Skeleton / SkelAnimation、jointIndices / jointWeights）
 - モーフターゲット → BlendShape（ウェイトの固定値とアニメーション。スキンなしでも可）
