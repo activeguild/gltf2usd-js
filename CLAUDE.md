@@ -196,7 +196,12 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
    accessor / mesh / node / skin / animation）が不正なら `GltfValidationError`（何番の何が不正かを書く）。0 埋め・切り詰めで続けない。
    マテリアル / テクスチャ / 画像 / ライト / バリアントの不正な参照は従来どおり無視して警告（見た目のデータで、無くても形は正しい）。
    GLB は totalLength = 入力サイズ、チャンク長は 4 の倍数、JSON が先頭で 1 つ、BIN は 2 番目で 1 つまで、未知のチャンクは読み飛ばす。
-   accessor の byteOffset のアライメント違反は DataView で読めるので拒否しない（実ファイルを壊さないため）。
+   アライメント（§ 3.6.2.4 / § 3.7.2.1）: accessor の byteOffset と bufferView.byteOffset + accessor.byteOffset は componentType の
+   バイト数の倍数、頂点属性（morph target を含む）の byteOffset は 4 の倍数。インデックス / inverseBindMatrices / アニメーションの
+   accessor は byteStride 付きの bufferView を使えない。sparse の indices / values の bufferView は byteStride・target なし、
+   bufferView.byteOffset と indices / values の byteOffset はそれぞれの componentType のバイト数の倍数。
+   （以前は「DataView で読めるので拒否しない」としていたが、指示により仕様どおり拒否する。既存 26 フィクスチャ・Khronos 19 モデル・
+   gltf-transform の meshopt / 量子化出力で誤検出がないことを確認済み。）
    アニメーションのキーが壊れたチャンネル（時刻が減る、NaN / Infinity、個数が合わない）は警告してスキップ。同時刻のキーは最後を残す。
    JOINTS の範囲外（ウェイト > 0）・負 / NaN のウェイトはエラー、ウェイトの合計が 1 でない頂点は警告してそのまま書く。
    Mesh: 頂点属性（NORMAL / TANGENT / TEXCOORD_n / COLOR_n / JOINTS_n / WEIGHTS_n）と morph target の要素数は POSITION と同じ

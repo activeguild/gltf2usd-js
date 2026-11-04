@@ -335,6 +335,68 @@ rejects(withJson((j) => { j.meshes[0].primitives.push({ attributes: {} }); }), /
   rejects(makeGlb(j, b), /accessor 2 sparse index 1 is 1 \(a duplicate\); indices must be strictly increasing/, "duplicate sparse indices in an unused accessor");
 }
 
+// ---- Sparse bufferView constraints and alignment ----
+{
+  // Accessor 0 (POSITION) = zeros + sparse: indices in bufferView 1 (USHORT), values in bufferView 0.
+  const sparseDoc = (fn) => withJson((j) => {
+    j.accessors[0] = { componentType: 5126, count: 3, type: "VEC3", sparse: { count: 2, indices: { bufferView: 1, componentType: 5123 }, values: { bufferView: 0 } } };
+    fn(j, j.accessors[0].sparse);
+  });
+  rejects(sparseDoc((j) => { j.bufferViews[1].byteStride = 4; }), /Invalid sparse accessor indices: accessor 0 sparse.indices bufferView 1 must not define byteStride/, "sparse indices view with byteStride");
+  rejects(sparseDoc((j) => { j.bufferViews[1].target = 34963; }), /sparse.indices bufferView 1 must not define target/, "sparse indices view with target");
+  rejects(sparseDoc((j) => { j.bufferViews[0].byteStride = 12; }), /Invalid sparse accessor values: accessor 0 sparse.values bufferView 0 must not define byteStride/, "sparse values view with byteStride");
+  rejects(sparseDoc((j) => { j.bufferViews[0].target = 34962; }), /sparse.values bufferView 0 must not define target/, "sparse values view with target");
+  rejects(sparseDoc((j, sp) => { sp.indices.byteOffset = 1; }), /sparse.indices.byteOffset 1 is not a multiple of 2/, "misaligned sparse indices.byteOffset");
+  rejects(sparseDoc((j, sp) => { sp.values.byteOffset = 2; }), /sparse.values.byteOffset 2 is not a multiple of 4/, "misaligned sparse values.byteOffset");
+  rejects(sparseDoc((j, sp) => { j.bufferViews.push({ buffer: 0, byteOffset: 37, byteLength: 4 }); sp.indices.bufferView = 2; }),
+    /sparse.indices bufferView 2 byteOffset 37 is not a multiple of 2/, "sparse indices bufferView.byteOffset misaligned");
+  rejects(sparseDoc((j, sp) => { j.bufferViews.push({ buffer: 0, byteOffset: 2, byteLength: 24 }); sp.values.bufferView = 2; }),
+    /sparse.values bufferView 2 byteOffset 2 is not a multiple of 4/, "sparse values bufferView.byteOffset misaligned");
+}
+
+// ---- Accessor alignment and byteStride by use ----
+{
+  const extra = (fn) => withJson((j) => { fn(j); });
+  // Component-size alignment (any accessor, used or not).
+  rejects(extra((j) => { j.accessors.push({ bufferView: 0, componentType: 5126, count: 1, type: "SCALAR", byteOffset: 2 }); }),
+    /Accessor alignment: accessor 2 byteOffset 2 is not a multiple of its component size 4/, "FLOAT accessor at byteOffset 2");
+  rejects(extra((j) => { j.accessors.push({ bufferView: 1, componentType: 5123, count: 1, type: "SCALAR", byteOffset: 1 }); }),
+    /accessor 2 byteOffset 1 is not a multiple of its component size 2/, "USHORT accessor at byteOffset 1");
+  rejects(extra((j) => { j.bufferViews.push({ buffer: 0, byteOffset: 2, byteLength: 8 }); j.accessors.push({ bufferView: 2, componentType: 5126, count: 2, type: "SCALAR" }); }),
+    /accessor 2: bufferView 2 byteOffset 2 \+ accessor byteOffset 0 is not a multiple of its component size 4/, "bufferView + accessor offset misaligned");
+  rejects(extra((j) => { j.bufferViews.push({ buffer: 0, byteOffset: 1, byteLength: 8 }); j.accessors.push({ bufferView: 2, componentType: 5123, count: 1, type: "SCALAR", byteOffset: 2 }); }),
+    /bufferView 2 byteOffset 1 \+ accessor byteOffset 2 is not a multiple of its component size 2/, "odd sum for USHORT");
+  // Vertex attributes: 4-byte boundaries even for 1- / 2-byte components.
+  rejects(extra((j) => {
+    j.accessors.push({ bufferView: 0, componentType: 5123, normalized: true, count: 3, type: "VEC2", byteOffset: 2 });
+    j.meshes[0].primitives[0].attributes.TEXCOORD_0 = 2;
+  }), /accessor 2 is a vertex attribute; its byteOffset 2 must be a multiple of 4/, "vertex attribute at byteOffset 2");
+  // Non-vertex accessors must not use a strided bufferView.
+  rejects(extra((j) => {
+    j.bufferViews.push({ buffer: 0, byteOffset: 0, byteLength: 12, byteStride: 4 });
+    j.accessors[1].bufferView = 2;
+  }), /accessor 1 \(indices\) uses bufferView 2, which defines byteStride; only vertex attributes may use a strided bufferView/, "indices in a strided bufferView");
+  {
+    const j = clone(json);
+    j.bufferViews.push({ buffer: 0, byteOffset: 0, byteLength: 4, byteStride: 4 });
+    j.accessors.push({ bufferView: 2, componentType: 5126, count: 1, type: "SCALAR" }, { componentType: 5126, count: 1, type: "VEC3" });
+    j.animations = [{ samplers: [{ input: 2, output: 3 }], channels: [{ sampler: 0, target: { node: 0, path: "translation" } }] }];
+    rejects(makeGlb(j, bin), /accessor 2 \(animation input\) uses bufferView 2, which defines byteStride/, "animation input in a strided bufferView");
+  }
+  // Valid FLOAT, UNSIGNED_BYTE and UNSIGNED_SHORT accessors (with byteOffset, interleaved stride) still pass.
+  const ok = extra((j) => {
+    j.bufferViews.push({ buffer: 0, byteOffset: 0, byteLength: 36, byteStride: 12 });
+    j.accessors.push(
+      { bufferView: 2, componentType: 5121, normalized: true, count: 3, type: "VEC2", byteOffset: 4 },  // TEXCOORD_0 UBYTE
+      { bufferView: 2, componentType: 5123, normalized: true, count: 3, type: "VEC4", byteOffset: 4 },  // COLOR_0 USHORT
+      { bufferView: 1, componentType: 5121, count: 4, type: "SCALAR", byteOffset: 1 },                  // unused UBYTE at offset 1
+    );
+    Object.assign(j.meshes[0].primitives[0].attributes, { TEXCOORD_0: 2, COLOR_0: 3 });
+  });
+  const usda = accepts(ok, "aligned FLOAT / UNSIGNED_BYTE / UNSIGNED_SHORT accessors");
+  assert(usda.includes("primvars:st") && usda.includes("primvars:displayColor"), "aligned accessors convert");
+}
+
 // No internal TypedArray / DataView errors escape for any single-byte corruption of the
 // header and JSON-chunk header: every failure is a GltfValidationError.
 for (let i = 0; i < 20; i++) {

@@ -241,6 +241,17 @@ export function validateDocument(json, limits) {
       const vbv = ref(s.values.bufferView, bufferViews, "values bufferView", sw);
       const vEnd = nonNegInt(s.values.byteOffset, "values byteOffset", sw) + s.count * layout.size;
       if (vEnd > vbv.byteLength) fail(`Invalid sparse accessor values: ${sw} needs ${vEnd} bytes, bufferView ${s.values.bufferView} has ${vbv.byteLength}`);
+      // Sparse data is tightly packed and not GPU-bound: no byteStride / target, aligned to the component size.
+      const sparseView = (part, bv, viewIndex, componentSize) => {
+        const label = `Invalid sparse accessor ${part}: ${sw}.${part} bufferView ${viewIndex}`;
+        if (bv.byteStride !== undefined) fail(`${label} must not define byteStride`);
+        if (bv.target !== undefined) fail(`${label} must not define target`);
+        if ((bv.byteOffset ?? 0) % componentSize) fail(`${label} byteOffset ${bv.byteOffset} is not a multiple of ${componentSize}`);
+        const own = s[part].byteOffset ?? 0;
+        if (own % componentSize) fail(`Invalid sparse accessor ${part}: ${sw}.${part}.byteOffset ${own} is not a multiple of ${componentSize}`);
+      };
+      sparseView("indices", ibv, s.indices.bufferView, COMPONENT_SIZE[s.indices.componentType]);
+      sparseView("values", vbv, s.values.bufferView, COMPONENT_SIZE[acc.componentType]);
     }
   });
 
@@ -378,6 +389,42 @@ export function validateDocument(json, limits) {
       const target = object(c, "target", `${where} channel ${k}`);
       if (target.node !== undefined) ref(target.node, nodes, "target node", `${where} channel ${k}`);
     });
+  });
+
+  // Accessor alignment (glTF 2.0 § 3.6.2.4 / § 3.7.2.1), by what the accessor is used for.
+  // Vertex attributes: byteOffset a multiple of 4 (byteStride is already checked above).
+  // Non-vertex data (indices, inverse bind matrices, animation samplers): tightly packed,
+  // so the bufferView must not define byteStride.
+  const vertexUse = new Set();
+  const otherUse = new Map();
+  for (const mesh of meshes) {
+    for (const p of mesh.primitives) {
+      for (const a of Object.values(p.attributes || {})) vertexUse.add(a);
+      for (const t of p.targets || []) for (const a of Object.values(t)) vertexUse.add(a);
+      if (p.indices !== undefined) otherUse.set(p.indices, "indices");
+    }
+  }
+  for (const skin of skins) if (skin.inverseBindMatrices !== undefined) otherUse.set(skin.inverseBindMatrices, "inverseBindMatrices");
+  for (const anim of animations) {
+    for (const smp of anim.samplers || []) {
+      otherUse.set(smp.input, "animation input");
+      otherUse.set(smp.output, "animation output");
+    }
+  }
+  accessors.forEach((acc, i) => {
+    if (acc.bufferView === undefined) return;
+    const bv = bufferViews[acc.bufferView];
+    const cs = COMPONENT_SIZE[acc.componentType];
+    const own = acc.byteOffset ?? 0;
+    const where = `Accessor alignment: accessor ${i}`;
+    if (own % cs) fail(`${where} byteOffset ${own} is not a multiple of its component size ${cs}`);
+    if (((bv.byteOffset ?? 0) + own) % cs) {
+      fail(`${where}: bufferView ${acc.bufferView} byteOffset ${bv.byteOffset ?? 0} + accessor byteOffset ${own} is not a multiple of its component size ${cs}`);
+    }
+    if (vertexUse.has(i) && own % 4) fail(`${where} is a vertex attribute; its byteOffset ${own} must be a multiple of 4`);
+    if (otherUse.has(i) && !vertexUse.has(i) && bv.byteStride !== undefined) {
+      fail(`${where} (${otherUse.get(i)}) uses bufferView ${acc.bufferView}, which defines byteStride; only vertex attributes may use a strided bufferView`);
+    }
   });
 
   // Images stored in bufferViews (read directly when packaging textures).
