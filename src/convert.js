@@ -40,6 +40,7 @@ const SUPPORTED_EXTENSIONS = new Set([
   "KHR_lights_punctual",
   "EXT_mesh_gpu_instancing",
   "KHR_materials_variants",
+  "EXT_meshopt_compression",
 ]);
 
 /** USD primvar name for glTF TEXCOORD_n: st, st1, st2, ... */

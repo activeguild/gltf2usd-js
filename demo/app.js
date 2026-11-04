@@ -2,6 +2,8 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+// Reference decoder for the glTF view only; the converter has its own (src/meshopt.js).
+import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 
 import { glbToUsdz, parseGltf, resolveResource } from "../src/index.js";
 import { buildAnimatedGlb, buildCubeGlb, buildCubeGltf, buildFeatureGlb, buildSkinnedGlb } from "../test/cube-glb.js";
@@ -378,7 +380,7 @@ function showGltf(glb, resources) {
       }
       return blobUrls.get(bytes);
     });
-    new GLTFLoader(manager).parse(buf, "", (gltf) => {
+    new GLTFLoader(manager).setMeshoptDecoder(MeshoptDecoder).parse(buf, "", (gltf) => {
       lastGltf = gltf;
       fixTextureTransforms(gltf.scene);
       setContent(views[0], gltf.scene);

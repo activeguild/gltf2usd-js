@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { glbToUsda, glbToUsdz } from "../src/index.js";
 import { buildCubeGltf } from "./cube-glb.js";
+import { decodeMeshopt } from "../src/meshopt.js";
+import { VECTORS, CUBE_VIEWS } from "./meshopt-vectors.js";
 
 const glb = readFileSync(new URL("./cube.glb", import.meta.url));
 const { usda, files } = glbToUsda(glb);
@@ -247,6 +249,37 @@ assert(f.usda.includes('def Mesh "CubeC"') && f.usda.includes('def Xform "CubeC_
   assert(at("Red_Look").includes("</Root/Materials/Red_Mat>"), "unmapped variant falls back to the default material");
   assert(at("Blue").includes("rel material:binding = </Root/Materials/Blue>"), "mapped variant binds its material");
   assert(w.length === 0, `no warnings: ${w}`);
+}
+
+// ---- EXT_meshopt_compression decoder ----
+{
+  const fromB64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+  for (const v of VECTORS) {
+    const out = decodeMeshopt(fromB64(v.encoded), v);
+    const expected = fromB64(v.expected);
+    assert(out.length === expected.length && out.every((x, i) => x === expected[i]), `meshopt ${v.name} matches the reference decoder`);
+  }
+  // The cube with all four bufferViews meshopt-compressed (fallback buffer has no data)
+  // must convert to exactly the same USDA as the uncompressed cube.
+  const { gltf, resources } = buildCubeGltf();
+  const j = JSON.parse(gltf);
+  const packed = CUBE_VIEWS.map((v) => fromB64(v.encoded));
+  const all = new Uint8Array(packed.reduce((n, p) => n + p.length + ((4 - (p.length % 4)) % 4), 0));
+  let off = 0;
+  CUBE_VIEWS.forEach((v, i) => {
+    all.set(packed[i], off);
+    j.bufferViews[i] = {
+      buffer: 2, byteOffset: j.bufferViews[i].byteOffset, byteLength: j.bufferViews[i].byteLength,
+      ...(v.mode === "ATTRIBUTES" ? { byteStride: v.byteStride } : {}),
+      extensions: { EXT_meshopt_compression: { buffer: 1, byteOffset: off, byteLength: packed[i].length, byteStride: v.byteStride, count: v.count, mode: v.mode } },
+    };
+    off += packed[i].length + ((4 - (packed[i].length % 4)) % 4);
+  });
+  j.buffers.push({ byteLength: all.length, uri: `data:application/octet-stream;base64,${btoa(String.fromCharCode(...all))}` });
+  j.buffers.push({ byteLength: 1000, extensions: { EXT_meshopt_compression: { fallback: true } } });
+  j.extensionsUsed = j.extensionsRequired = ["EXT_meshopt_compression"];
+  const w = [];
+  assert(glbToUsda(j, { resources, onWarning: (m) => w.push(m) }).usda === usda && w.length === 0, `meshopt cube converts like the plain cube: ${w}`);
 }
 
 // ---- Compressed data that cannot be decoded is skipped, not written as zeros ----

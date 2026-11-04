@@ -1,4 +1,5 @@
 // GLB (glTF 2.0 binary) parser. Zero dependencies, works in browser and Node.
+import { decodeMeshopt } from "./meshopt.js";
 // Spec: https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#glb-file-format-specification
 
 const GLB_MAGIC = 0x46546c67; // "glTF"
@@ -89,6 +90,7 @@ export class GltfAsset {
     this.bin = bin;
     this._resources = resources;
     this._buffers = (json.buffers || []).map((b, i) => this._loadBuffer(b, i));
+    this._decodedViews = new Map(); // EXT_meshopt_compression results by bufferView index
   }
 
   _loadBuffer(buffer, index) {
@@ -109,22 +111,30 @@ export class GltfAsset {
     return bytes;
   }
 
-  /** Raw bytes of a bufferView. */
+  /** Raw bytes of a bufferView (decompressed if it uses EXT_meshopt_compression). */
   bufferViewBytes(index) {
-    const bv = this.json.bufferViews[index];
-    const buf = this._viewBuffer(index);
-    return new Uint8Array(buf.buffer, buf.byteOffset + (bv.byteOffset || 0), bv.byteLength);
+    return this._viewData(index);
   }
 
-  /** The buffer holding a bufferView's bytes, or DataUnavailableError. */
-  _viewBuffer(index) {
+  /** A bufferView's bytes, exactly byteLength long, or DataUnavailableError. */
+  _viewData(index) {
+    if (this._decodedViews.has(index)) return this._decodedViews.get(index);
     const bv = this.json.bufferViews[index];
-    const buf = this._buffers[bv.buffer];
-    if (!buf) {
-      const how = bv.extensions?.EXT_meshopt_compression ? " (EXT_meshopt_compression)" : "";
-      throw new DataUnavailableError(`bufferView ${index} is compressed${how} and cannot be read`);
+    const ext = bv.extensions?.EXT_meshopt_compression;
+    const src = ext && this._buffers[ext.buffer];
+    if (src) {
+      let bytes;
+      try {
+        bytes = decodeMeshopt(new Uint8Array(src.buffer, src.byteOffset + (ext.byteOffset || 0), ext.byteLength), ext);
+      } catch (e) {
+        throw new DataUnavailableError(`bufferView ${index}: ${e.message}`);
+      }
+      this._decodedViews.set(index, bytes);
+      return bytes;
     }
-    return buf;
+    const buf = this._buffers[bv.buffer];
+    if (!buf) throw new DataUnavailableError(`bufferView ${index} has no readable data`);
+    return new Uint8Array(buf.buffer, buf.byteOffset + (bv.byteOffset || 0), bv.byteLength);
   }
 
   /**
@@ -141,11 +151,11 @@ export class GltfAsset {
 
     if (acc.bufferView !== undefined) {
       const bv = this.json.bufferViews[acc.bufferView];
-      const buf = this._viewBuffer(acc.bufferView);
-      const base = buf.byteOffset + (bv.byteOffset || 0) + (acc.byteOffset || 0);
+      const view = this._viewData(acc.bufferView);
+      const base = view.byteOffset + (acc.byteOffset || 0);
       const elemSize = info.size * numComponents;
       const stride = bv.byteStride || elemSize;
-      const dv = new DataView(buf.buffer);
+      const dv = new DataView(view.buffer);
       const reader = componentReader(dv, acc.componentType);
       for (let i = 0; i < count; i++) {
         const elemBase = base + i * stride;
@@ -163,18 +173,16 @@ export class GltfAsset {
 
   _applySparse(acc, data, numComponents, info) {
     const s = acc.sparse;
-    const idxBv = this.json.bufferViews[s.indices.bufferView];
-    const idxBuf = this._viewBuffer(s.indices.bufferView);
-    const idxDv = new DataView(idxBuf.buffer);
+    const idxView = this._viewData(s.indices.bufferView);
+    const idxDv = new DataView(idxView.buffer);
     const idxReader = componentReader(idxDv, s.indices.componentType);
     const idxSize = COMPONENT_INFO[s.indices.componentType].size;
-    const idxBase = idxBuf.byteOffset + (idxBv.byteOffset || 0) + (s.indices.byteOffset || 0);
+    const idxBase = idxView.byteOffset + (s.indices.byteOffset || 0);
 
-    const valBv = this.json.bufferViews[s.values.bufferView];
-    const valBuf = this._viewBuffer(s.values.bufferView);
-    const valDv = new DataView(valBuf.buffer);
+    const valView = this._viewData(s.values.bufferView);
+    const valDv = new DataView(valView.buffer);
     const valReader = componentReader(valDv, acc.componentType);
-    const valBase = valBuf.byteOffset + (valBv.byteOffset || 0) + (s.values.byteOffset || 0);
+    const valBase = valView.byteOffset + (s.values.byteOffset || 0);
 
     for (let i = 0; i < s.count; i++) {
       const target = idxReader(idxBase + i * idxSize);

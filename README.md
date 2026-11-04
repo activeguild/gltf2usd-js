@@ -80,7 +80,8 @@ GLB を選ぶかドロップすると（またはサンプルボタンで）、�
 - EXT_mesh_gpu_instancing（インスタンスごとの instanceable reference に展開）
 - KHR_materials_variants → variantSet（`default` + 各バリアント）
 - KHR_lights_punctual → UsdLux（DistantLight / SphereLight / ShapingAPI。強さは近似）
-- 圧縮メッシュ: Draco は非圧縮 fallback があれば使用、なければスキップ。meshopt は未デコード（スキップして警告）
+- EXT_meshopt_compression（依存ゼロの自前デコーダ）
+- Draco（KHR_draco_mesh_compression）は非圧縮 fallback があれば使用、なければスキップして警告
 - アニメーション（1 本）: TRS を `xformOp:translate` / `orient` / `scale` の timeSamples に。LINEAR / STEP / CUBICSPLINE
   （STEP は保持サンプル、CUBICSPLINE は 24fps でベイク）。`{ animation: index | name }` で選択
 - スキン → UsdSkel（SkelRoot / Skeleton / SkelAnimation、jointIndices / jointWeights）

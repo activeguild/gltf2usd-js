@@ -21,6 +21,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
 | `src/animation.js` | `evaluateAnimation(ctx, which)`, `sampleAt()` | glTF アニメーション 1 本 → ノードごとの TRS / weights サンプル |
 | `src/skin.js` | `planSkins()`, `buildSkeleton()`, `skinningPrimvars()` | glTF skin → SkelRoot / Skeleton / SkelAnimation、jointIndices / Weights |
 | `src/morph.js` | `addBlendShapes()`, `restWeights()` | morph target → BlendShape prim、skel:blendShapes |
+| `src/meshopt.js` | `decodeMeshopt(source, ext)` | EXT_meshopt_compression の ATTRIBUTES / TRIANGLES / INDICES と 3 フィルタ |
 | `src/math.js` | 4x4 行列（glTF 規約）、`decompose()`、`slerp()` | `composeTRS` もここ |
 | `src/names.js` | `sanitize()`, `uniqueName()` | prim 名・ジョイント名 |
 | `src/ir.js` | `Layer` / `Prim`（`attr()` / `rel()` / `child()`） | USD 側のプリム・属性ツリー。値の表現規約は冒頭コメント |
@@ -31,6 +32,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
 | `test/cube-glb.js` | テスト用 GLB をメモリ上で生成（Node / ブラウザ共用） | `buildCubeGlb()`（段階 1）、`buildFeatureGlb()`（段階 2）、`buildAnimatedGlb()`（段階 3）、`buildSkinnedGlb()`（段階 4）、`buildCubeGltf()` |
 | `test/make-glb.js` | 上記を `test/*.glb` と `test/gltf/`（外部ファイル付き .gltf）に書き出す | |
 | `test/png.js` | テスト画像用の小さな PNG エンコーダ | |
+| `test/meshopt-vectors.js` | meshopt のテストベクトル（meshoptimizer のエンコーダで生成した入力とリファレンス出力） | 依存なしでデコーダを検証するため |
 | `test/run.js` | JS 側の単体テスト（prim 名、zip アライン検証） | `npm test` |
 | `test/validate.py` | OpenUSD で開いてバリデータ実行 | `pip install usd-core` が必要 |
 | `demo/` | Web テストアプリ（`npm run demo` → `http://localhost:8080/demo/`） | 下記 |
@@ -86,6 +88,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
 - KHR_lights_punctual → UsdLux（directional → DistantLight、point → SphereLight + treatAsPoint、spot → + ShapingAPI。
   強さは glTF の lux / candela をそのまま。UsdLux は単位を明示していないので近似。range は警告。AR Quick Look はライトを無視する）
 - KHR_materials_unlit（近似: diffuseColor = 黒、baseColor → emissiveColor、`ior = 1` でフレネル反射を消す。他の PBR 入力は無視）
+- EXT_meshopt_compression（`src/meshopt.js`。全モード・全フィルタ。bufferView 単位でデコードしてキャッシュ）
 - KHR_mesh_quantization（整数・正規化 accessor + ノード変換。gltf-transform で量子化した DamagedHelmet / CesiumMan を
   three.js と比較して一致を確認）
 - KHR_materials_emissive_strength（emissiveColor に乗算）、KHR_materials_ior（`inputs:ior`）、
@@ -96,7 +99,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
 ### 未対応（既知）
 - KHR_materials_transmission / volume / specular / sheen など（警告）
 - KHR_draco_mesh_compression: 非圧縮の fallback があればそれを使う。なければそのプリミティブをスキップして警告
-- EXT_meshopt_compression: 未デコード。fallback バッファしかない bufferView を読むと `DataUnavailableError` になり、
+- 読めないデータ（Draco の fallback なし、壊れた meshopt 列など）は `DataUnavailableError` になり、
   メッシュ / アニメーションのチャンネル / スキンの単位でスキップして警告（以前のように 0 埋めで壊れたメッシュは出さない）
 - POINTS / LINES プリミティブ（スキップして警告）
 - 2 本目以降のアニメーション（`options.animation` で 1 本選ぶ。警告あり）
@@ -147,6 +150,10 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
 14. **material variants では、対象 Mesh に binding を直接書かない。** USD の強さは LIVRPS で Local > Variant なので、
    直接書くとどの variant でも上書きできない（OpenUSD で確認して判明）。代わりに `default` variant に既定マテリアルを入れて
    選択しておく（glTF の「未選択」に相当）。各 variant は「対応付けがあればそのマテリアル、なければ既定マテリアル」。
+15. **meshopt デコーダは仕様のビット列から独立実装**（ライブラリのコードは移植していない）。meshoptimizer のスカラー版デコーダと、
+   gltf-transform で圧縮した 6 ファイルの全 55 bufferView、およびエンコーダを使ったランダムテスト 81 ケースでバイト一致。
+   QUATERNION フィルタは float32 で計算（`Math.fround`）し、.5 ちょうどは 0 から遠い側へ丸める（スカラー版と同じ）。
+   SIMD 版（three.js が使う）は偶数丸めなので、ちょうど .5 の値だけ int16 で 1 違う（表示上は無関係）。
 
 ## OpenUSD バリデータに指摘されて直した点（再発注意）
 
