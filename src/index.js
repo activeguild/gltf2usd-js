@@ -3,12 +3,12 @@ import { parseGLB, parseGltf, GltfAsset, resolveResource, DataUnavailableError }
 import { GltfValidationError, DEFAULT_LIMITS } from "./validate.js";
 import { gltfToStage } from "./convert.js";
 import { writeUsda } from "./usda.js";
-import { packUsdz } from "./usdz.js";
+import { packUsdz, UsdzLimitError } from "./usdz.js";
 import { Layer, Prim } from "./ir.js";
 
 export {
   parseGLB, parseGltf, GltfAsset, resolveResource, gltfToStage, writeUsda, packUsdz, Layer, Prim,
-  GltfValidationError, DataUnavailableError, DEFAULT_LIMITS,
+  GltfValidationError, DataUnavailableError, DEFAULT_LIMITS, UsdzLimitError,
 };
 
 /** GltfAsset → { usda, files }: gltfToStage (glTF → USD IR) followed by writeUsda (IR → text). */
