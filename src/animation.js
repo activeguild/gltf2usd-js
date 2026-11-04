@@ -13,6 +13,9 @@
 import { slerp } from "./math.js";
 import { DataUnavailableError } from "./glb.js";
 
+/** A sampler whose data cannot be animated as-is; its channel is skipped with a warning. */
+class InvalidSamplerError extends Error {}
+
 export const TIME_CODES_PER_SECOND = 24;
 const STEP_EPSILON = 1e-3; // time codes
 const PATH_SIZE = { translation: 3, rotation: 4, scale: 3, weights: 0 }; // weights: one per morph target
@@ -75,11 +78,18 @@ export function evaluateAnimation(ctx, which = 0) {
     try {
       samples = evaluateSampler(ctx, sampler, target.path, name);
     } catch (e) {
-      if (!(e instanceof DataUnavailableError)) throw e;
+      if (!(e instanceof DataUnavailableError || e instanceof InvalidSamplerError)) throw e;
       ctx.warn(`Animation "${name}": channel for node ${target.node} ${target.path} skipped: ${e.message}`);
       continue;
     }
     if (!samples.length) continue;
+    if (target.path === "weights") {
+      const targets = Math.max(...ctx.json.meshes[node.mesh].primitives.map((p) => p.targets?.length ?? 0));
+      if (samples[0][1].length !== targets) {
+        ctx.warn(`Animation "${name}": weights channel on node ${target.node} has ${samples[0][1].length} weights per key, its mesh has ${targets} morph targets; skipped`);
+        continue;
+      }
+    }
     start = Math.min(start, samples[0][0]);
     end = Math.max(end, samples[samples.length - 1][0]);
     if (!nodes.has(target.node)) nodes.set(target.node, {});
@@ -99,14 +109,51 @@ function toTimeCode(seconds) {
   return Math.abs(tc - frame) < 1e-4 ? frame : Math.round(tc * 1e6) / 1e6;
 }
 
+/**
+ * Check a sampler's keys (glTF: times are finite and strictly increasing; the output
+ * has one value, or in-tangent + value + out-tangent for CUBICSPLINE, per key).
+ * Invalid data throws InvalidSamplerError, so the channel is skipped with a warning
+ * instead of producing out-of-order or NaN timeSamples. Repeated times (a common
+ * exporter shortcut for a jump) keep the last key of each run, with a warning: USD
+ * timeSamples hold one value per time.
+ * @returns {{ times: number[], out: number[], size: number }}
+ */
+function checkedKeys(ctx, sampler, path, animName, interpolation) {
+  let times = ctx.asset.accessor(sampler.input).data;
+  let out = ctx.asset.accessor(sampler.output).data;
+  const perKey = interpolation === "CUBICSPLINE" ? 3 : 1;
+  const n = times.length;
+  if (!n) return { times, out, size: PATH_SIZE[path] || 1 };
+  // Morph weights have one value per target; derive the count from the accessors.
+  const size = PATH_SIZE[path] || out.length / (n * perKey);
+  if (!Number.isInteger(size) || size < 1 || out.length !== n * perKey * size) {
+    throw new InvalidSamplerError(`output has ${out.length} values for ${n} keys (${interpolation})`);
+  }
+  const bad = times.findIndex((t) => !Number.isFinite(t));
+  if (bad >= 0) throw new InvalidSamplerError(`key time ${bad} is ${times[bad]}`);
+  const badValue = out.findIndex((v) => !Number.isFinite(v));
+  if (badValue >= 0) throw new InvalidSamplerError(`output value ${badValue} is ${out[badValue]}`);
+  for (let i = 1; i < n; i++) {
+    if (times[i] < times[i - 1]) throw new InvalidSamplerError(`key times are not increasing (key ${i}: ${times[i]} after ${times[i - 1]})`);
+  }
+  if (times.some((t, i) => i && t === times[i - 1])) {
+    ctx.warn(`Animation "${animName}": a ${path} sampler repeats key times; the last key at each time is kept`);
+    const keep = times.map((t, i) => i + 1 === n || times[i + 1] !== t);
+    const stride = perKey * size;
+    out = out.filter((_, j) => keep[Math.floor(j / stride)]);
+    times = times.filter((_, i) => keep[i]);
+  }
+  return { times, out, size };
+}
+
 /** @returns {[number, number[]][]} [timeCode, value] pairs */
 function evaluateSampler(ctx, sampler, path, animName) {
-  const times = ctx.asset.accessor(sampler.input).data;
-  const out = ctx.asset.accessor(sampler.output).data;
   const interpolation = sampler.interpolation ?? "LINEAR";
-  // Morph weights have one value per target; derive the count from the accessors.
-  const perKey = interpolation === "CUBICSPLINE" ? 3 : 1;
-  const size = PATH_SIZE[path] || Math.round(out.length / (times.length * perKey)) || 1;
+  if (interpolation !== "LINEAR" && interpolation !== "STEP" && interpolation !== "CUBICSPLINE") {
+    ctx.warn(`Animation "${animName}": unknown interpolation ${interpolation}; skipped`);
+    return [];
+  }
+  const { times, out, size } = checkedKeys(ctx, sampler, path, animName, interpolation);
   const n = times.length;
   if (!n) return [];
   const tc = toTimeCode;
@@ -150,8 +197,6 @@ function evaluateSampler(ctx, sampler, path, animName) {
     }
     return samples;
   }
-
-  ctx.warn(`Animation "${animName}": unknown interpolation ${interpolation}; skipped`);
   return [];
 }
 

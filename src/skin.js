@@ -17,7 +17,7 @@ import { IDENTITY, decompose, invert, isIdentity, multiply, nodeLocalMatrix, com
 import { sampleAt } from "./animation.js";
 import { Prim } from "./ir.js";
 import { sanitize, uniqueName } from "./names.js";
-import { DataUnavailableError } from "./glb.js";
+import { DataUnavailableError, GltfValidationError } from "./glb.js";
 
 /**
  * @returns {Map<number, SkinPlan>} skin index → plan, for skins used by nodes in the scene
@@ -297,16 +297,28 @@ export function skinningPrimvars(ctx, plan, prim, vertexCount, meshName) {
   const elementSize = sets.length * 4;
   const indices = new Array(vertexCount * elementSize);
   const weights = new Array(vertexCount * elementSize);
+  const jointCount = plan.remap.length;
+  const fail = (msg) => { throw new GltfValidationError(`Mesh "${meshName}" (skin ${plan.index}): ${msg}`); };
+  let unweighted = 0;
+  let unnormalized = 0;
   const slots = [];
   for (let v = 0; v < vertexCount; v++) {
     slots.length = 0;
-    sets.forEach(([J, W]) => {
+    let sum = 0;
+    sets.forEach(([J, W], s) => {
       for (let c = 0; c < 4; c++) {
         const w = W[v * 4 + c];
+        const j = J[v * 4 + c];
+        if (!Number.isFinite(w) || w < 0) fail(`WEIGHTS_${s} of vertex ${v} is ${w} (weights must be finite and >= 0)`);
+        if (!Number.isInteger(j) || j < 0) fail(`JOINTS_${s} of vertex ${v} is ${j}`);
         // Zero-weight slots may hold any index; point them at joint 0.
-        slots.push([w ? plan.remap[J[v * 4 + c]] ?? 0 : 0, w]);
+        if (w && j >= jointCount) fail(`JOINTS_${s} of vertex ${v} is ${j}, but the skin has ${jointCount} joints`);
+        sum += w;
+        slots.push([w ? plan.remap[j] : 0, w]);
       }
     });
+    if (sum === 0) unweighted++;
+    else if (Math.abs(sum - 1) > 1e-3) unnormalized++;
     // Heaviest influence first (stable). glTF allows any order; the deformation is unchanged.
     slots.sort((a, b) => b[1] - a[1]);
     slots.forEach(([j, w], i) => {
@@ -314,5 +326,8 @@ export function skinningPrimvars(ctx, plan, prim, vertexCount, meshName) {
       weights[v * elementSize + i] = w;
     });
   }
+  // glTF requires weights summing to 1; both cases are written as-is (not renormalized).
+  if (unweighted) ctx.warn(`Mesh "${meshName}": ${unweighted} vertices have no joint weight (glTF requires weights summing to 1)`);
+  if (unnormalized) ctx.warn(`Mesh "${meshName}": ${unnormalized} vertices have joint weights not summing to 1; written as-is`);
   return { indices, weights, elementSize };
 }

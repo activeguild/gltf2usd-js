@@ -195,7 +195,10 @@ export function validateDocument(json, limits) {
     const where = `node ${i}`;
     if (!node || typeof node !== "object") fail(`${where} must be an object`);
     if (node.mesh !== undefined) ref(node.mesh, meshes, "mesh", where);
-    if (node.skin !== undefined) ref(node.skin, skins, "skin", where);
+    if (node.skin !== undefined) {
+      ref(node.skin, skins, "skin", where);
+      if (node.mesh === undefined) fail(`${where}: has a skin but no mesh`);
+    }
     for (const c of node.children || []) {
       ref(c, nodes, "child node", where);
       if (parentOf.has(c)) fail(`${where}: node ${c} already has parent node ${parentOf.get(c)} (glTF nodes form a forest)`);
