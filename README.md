@@ -41,7 +41,10 @@ GLB を選ぶかドロップすると（またはサンプルボタンで）、�
 右側の USD 表示は `demo/usda-parser.js` で USDA を読み直し、`demo/usd-preview.js` で three.js に組み立てる簡易プレビューです。
 `src/usda.js` とは独立に書いてあるので、出力を実際に読み戻した結果になります（OpenUSD のレンダラではありません）。
 デモだけ three.js を CDN（jsDelivr）から読み込みます。`src/` は引き続き依存ゼロです。
-静的ファイルだけで動くので、リポジトリのルートをそのまま GitHub Pages などで公開すれば `/demo/` で使えます。
+静的ファイルだけで動くので、リポジトリのルートをそのまま公開すれば `/demo/` で使えます。
+
+- **Vercel**: リポジトリをインポートするだけ（Framework Preset は "Other"、ビルド不要）。`vercel.json` で `/` → `/demo/` に転送します。
+- **GitHub Pages**: ルートを公開ディレクトリにして `/demo/` を開きます。
 
 ## 構成
 
