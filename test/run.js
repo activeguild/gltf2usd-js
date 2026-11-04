@@ -82,7 +82,11 @@ for (const e of ["emissive_strength", "KHR_materials_ior", "KHR_materials_clearc
 }
 
 // Warnings: unsupported extension, skipped LINES primitive; each reported once.
-assert(warnings.some((w) => w.includes("KHR_materials_unlit")), "warns about unsupported extension");
+assert(warnings.some((w) => w.includes("KHR_materials_transmission")), "warns about unsupported extension");
+// KHR_materials_unlit (material B): black diffuse, base color as emission, ior 1.
+assert(!warnings.some((w) => w.includes("KHR_materials_unlit")), "unlit is supported");
+assert(matB.includes("color3f inputs:diffuseColor = (0, 0, 0)") && matB.includes("color3f inputs:emissiveColor.connect = </Root/Materials/B/Texture_baseColor.outputs:rgb>"), "unlit: emission from base color");
+assert(matB.includes("float inputs:ior = 1") && matB.includes("float inputs:roughness = 1"), "unlit: no Fresnel reflection");
 assert(!warnings.some((w) => w.includes("KHR_texture_transform") || w.includes("TEXCOORD")), `no warning for supported UV features: ${warnings}`);
 assert(warnings.some((w) => w.includes("LINES")), "warns about LINES primitive");
 assert(new Set(warnings).size === warnings.length, "warnings are deduplicated");

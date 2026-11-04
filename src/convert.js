@@ -36,6 +36,7 @@ const SUPPORTED_EXTENSIONS = new Set([
   // Quantized attributes are ordinary (normalized) integer accessors plus node transforms;
   // verified against three.js with gltf-transform-quantized DamagedHelmet / CesiumMan.
   "KHR_mesh_quantization",
+  "KHR_materials_unlit",
 ]);
 
 /** USD primvar name for glTF TEXCOORD_n: st, st1, st2, ... */
@@ -460,76 +461,96 @@ function buildMaterial(ctx, scope, mat, index) {
   const textures = []; // shaders to add after PreviewSurface
   const connect = (shader, output) => ({ connect: `${path}/${shader}.outputs:${output}` });
 
-  // Base color
-  const bcTex = textureFile(ctx, pbr.baseColorTexture);
-  if (bcTex) {
-    textures.push({ shader: "Texture_baseColor", ...bcTex, colorSpace: "sRGB", scale: baseColor });
-    surface.attr("color3f", "inputs:diffuseColor", undefined, connect("Texture_baseColor", "rgb"));
-    if (alphaMode !== "OPAQUE") surface.attr("float", "inputs:opacity", undefined, connect("Texture_baseColor", "a"));
-  } else {
-    surface.attr("color3f", "inputs:diffuseColor", baseColor.slice(0, 3));
-    if (alphaMode !== "OPAQUE") surface.attr("float", "inputs:opacity", baseColor[3]);
-  }
-  if (alphaMode === "MASK") surface.attr("float", "inputs:opacityThreshold", mat.alphaCutoff ?? 0.5);
-
-  // Metallic / roughness (glTF packs: G = roughness, B = metallic)
-  const mrTex = textureFile(ctx, pbr.metallicRoughnessTexture);
-  if (mrTex) {
-    textures.push({ shader: "Texture_metallicRoughness", ...mrTex, colorSpace: "raw", scale: [1, roughness, metallic, 1] });
-    surface.attr("float", "inputs:roughness", undefined, connect("Texture_metallicRoughness", "g"));
-    surface.attr("float", "inputs:metallic", undefined, connect("Texture_metallicRoughness", "b"));
-  } else {
-    surface.attr("float", "inputs:metallic", metallic);
-    surface.attr("float", "inputs:roughness", roughness);
-  }
-
-  // Normal map
-  const nTex = textureFile(ctx, mat.normalTexture);
-  if (nTex) {
-    textures.push({ shader: "Texture_normal", ...nTex, colorSpace: "raw", scale: [2, 2, 2, 1], bias: [-1, -1, -1, 0] });
-    surface.attr("normal3f", "inputs:normal", undefined, connect("Texture_normal", "rgb"));
-  }
-
-  // Occlusion (R channel)
-  const oTex = textureFile(ctx, mat.occlusionTexture);
-  if (oTex) {
-    textures.push({ shader: "Texture_occlusion", ...oTex, colorSpace: "raw" });
-    surface.attr("float", "inputs:occlusion", undefined, connect("Texture_occlusion", "r"));
-  }
-
-  // Emissive
-  const eTex = textureFile(ctx, mat.emissiveTexture);
-  if (eTex) {
-    textures.push({ shader: "Texture_emissive", ...eTex, colorSpace: "sRGB", scale: [...emissive, 1] });
-    surface.attr("color3f", "inputs:emissiveColor", undefined, connect("Texture_emissive", "rgb"));
-  } else if (emissive.some((v) => v !== 0)) {
-    surface.attr("color3f", "inputs:emissiveColor", emissive);
-  }
-
-  // KHR_materials_ior → inputs:ior (both default to 1.5)
-  if (ext.KHR_materials_ior?.ior !== undefined) surface.attr("float", "inputs:ior", ext.KHR_materials_ior.ior);
-
-  // KHR_materials_clearcoat: factor × texture.r → clearcoat, factor × texture.g → clearcoatRoughness
-  const cc = ext.KHR_materials_clearcoat;
-  if (cc) {
-    const ccFactor = cc.clearcoatFactor ?? 0;
-    const ccRough = cc.clearcoatRoughnessFactor ?? 0;
-    const ccTex = textureFile(ctx, cc.clearcoatTexture);
-    if (ccTex) {
-      textures.push({ shader: "Texture_clearcoat", ...ccTex, colorSpace: "raw", scale: [ccFactor, ccFactor, ccFactor, 1] });
-      surface.attr("float", "inputs:clearcoat", undefined, connect("Texture_clearcoat", "r"));
+  // KHR_materials_unlit: UsdPreviewSurface has no unlit mode. The usual approximation is
+  // black diffuse + base color as emission; ior = 1 removes the Fresnel reflection that
+  // the metallic workflow derives from ior. Other PBR inputs are ignored, as in glTF.
+  if (ext.KHR_materials_unlit) {
+    const bcTex = textureFile(ctx, pbr.baseColorTexture);
+    surface.attr("color3f", "inputs:diffuseColor", [0, 0, 0]);
+    if (bcTex) {
+      textures.push({ shader: "Texture_baseColor", ...bcTex, colorSpace: "sRGB", scale: baseColor });
+      surface.attr("color3f", "inputs:emissiveColor", undefined, connect("Texture_baseColor", "rgb"));
+      if (alphaMode !== "OPAQUE") surface.attr("float", "inputs:opacity", undefined, connect("Texture_baseColor", "a"));
     } else {
-      surface.attr("float", "inputs:clearcoat", ccFactor);
+      surface.attr("color3f", "inputs:emissiveColor", baseColor.slice(0, 3));
+      if (alphaMode !== "OPAQUE") surface.attr("float", "inputs:opacity", baseColor[3]);
     }
-    const ccrTex = textureFile(ctx, cc.clearcoatRoughnessTexture);
-    if (ccrTex) {
-      textures.push({ shader: "Texture_clearcoatRoughness", ...ccrTex, colorSpace: "raw", scale: [ccRough, ccRough, ccRough, 1] });
-      surface.attr("float", "inputs:clearcoatRoughness", undefined, connect("Texture_clearcoatRoughness", "g"));
+    if (alphaMode === "MASK") surface.attr("float", "inputs:opacityThreshold", mat.alphaCutoff ?? 0.5);
+    surface.attr("float", "inputs:metallic", 0);
+    surface.attr("float", "inputs:roughness", 1);
+    surface.attr("float", "inputs:ior", 1);
+  } else {
+    // Base color
+    const bcTex = textureFile(ctx, pbr.baseColorTexture);
+    if (bcTex) {
+      textures.push({ shader: "Texture_baseColor", ...bcTex, colorSpace: "sRGB", scale: baseColor });
+      surface.attr("color3f", "inputs:diffuseColor", undefined, connect("Texture_baseColor", "rgb"));
+      if (alphaMode !== "OPAQUE") surface.attr("float", "inputs:opacity", undefined, connect("Texture_baseColor", "a"));
     } else {
-      surface.attr("float", "inputs:clearcoatRoughness", ccRough);
+      surface.attr("color3f", "inputs:diffuseColor", baseColor.slice(0, 3));
+      if (alphaMode !== "OPAQUE") surface.attr("float", "inputs:opacity", baseColor[3]);
     }
-    if (cc.clearcoatNormalTexture) {
-      ctx.warn(`Material "${name}": clearcoatNormalTexture has no UsdPreviewSurface input; ignored`);
+    if (alphaMode === "MASK") surface.attr("float", "inputs:opacityThreshold", mat.alphaCutoff ?? 0.5);
+
+    // Metallic / roughness (glTF packs: G = roughness, B = metallic)
+    const mrTex = textureFile(ctx, pbr.metallicRoughnessTexture);
+    if (mrTex) {
+      textures.push({ shader: "Texture_metallicRoughness", ...mrTex, colorSpace: "raw", scale: [1, roughness, metallic, 1] });
+      surface.attr("float", "inputs:roughness", undefined, connect("Texture_metallicRoughness", "g"));
+      surface.attr("float", "inputs:metallic", undefined, connect("Texture_metallicRoughness", "b"));
+    } else {
+      surface.attr("float", "inputs:metallic", metallic);
+      surface.attr("float", "inputs:roughness", roughness);
+    }
+
+    // Normal map
+    const nTex = textureFile(ctx, mat.normalTexture);
+    if (nTex) {
+      textures.push({ shader: "Texture_normal", ...nTex, colorSpace: "raw", scale: [2, 2, 2, 1], bias: [-1, -1, -1, 0] });
+      surface.attr("normal3f", "inputs:normal", undefined, connect("Texture_normal", "rgb"));
+    }
+
+    // Occlusion (R channel)
+    const oTex = textureFile(ctx, mat.occlusionTexture);
+    if (oTex) {
+      textures.push({ shader: "Texture_occlusion", ...oTex, colorSpace: "raw" });
+      surface.attr("float", "inputs:occlusion", undefined, connect("Texture_occlusion", "r"));
+    }
+
+    // Emissive
+    const eTex = textureFile(ctx, mat.emissiveTexture);
+    if (eTex) {
+      textures.push({ shader: "Texture_emissive", ...eTex, colorSpace: "sRGB", scale: [...emissive, 1] });
+      surface.attr("color3f", "inputs:emissiveColor", undefined, connect("Texture_emissive", "rgb"));
+    } else if (emissive.some((v) => v !== 0)) {
+      surface.attr("color3f", "inputs:emissiveColor", emissive);
+    }
+
+    // KHR_materials_ior → inputs:ior (both default to 1.5)
+    if (ext.KHR_materials_ior?.ior !== undefined) surface.attr("float", "inputs:ior", ext.KHR_materials_ior.ior);
+
+    // KHR_materials_clearcoat: factor × texture.r → clearcoat, factor × texture.g → clearcoatRoughness
+    const cc = ext.KHR_materials_clearcoat;
+    if (cc) {
+      const ccFactor = cc.clearcoatFactor ?? 0;
+      const ccRough = cc.clearcoatRoughnessFactor ?? 0;
+      const ccTex = textureFile(ctx, cc.clearcoatTexture);
+      if (ccTex) {
+        textures.push({ shader: "Texture_clearcoat", ...ccTex, colorSpace: "raw", scale: [ccFactor, ccFactor, ccFactor, 1] });
+        surface.attr("float", "inputs:clearcoat", undefined, connect("Texture_clearcoat", "r"));
+      } else {
+        surface.attr("float", "inputs:clearcoat", ccFactor);
+      }
+      const ccrTex = textureFile(ctx, cc.clearcoatRoughnessTexture);
+      if (ccrTex) {
+        textures.push({ shader: "Texture_clearcoatRoughness", ...ccrTex, colorSpace: "raw", scale: [ccRough, ccRough, ccRough, 1] });
+        surface.attr("float", "inputs:clearcoatRoughness", undefined, connect("Texture_clearcoatRoughness", "g"));
+      } else {
+        surface.attr("float", "inputs:clearcoatRoughness", ccRough);
+      }
+      if (cc.clearcoatNormalTexture) {
+        ctx.warn(`Material "${name}": clearcoatNormalTexture has no UsdPreviewSurface input; ignored`);
+      }
     }
   }
 

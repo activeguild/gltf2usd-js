@@ -76,7 +76,7 @@ GLB を選ぶかドロップすると（またはサンプルボタンで）、�
 - TEXCOORD_1 以降（`primvars:st1` …）、テクスチャごとの `texCoord`
 - KHR_texture_transform（`UsdTransform2d`）
 - KHR_materials_emissive_strength / ior / clearcoat（transmission などは未対応で警告）
-- KHR_mesh_quantization
+- KHR_mesh_quantization、KHR_materials_unlit（黒 diffuse + 発光で近似）
 - 圧縮メッシュ: Draco は非圧縮 fallback があれば使用、なければスキップ。meshopt は未デコード（スキップして警告）
 - アニメーション（1 本）: TRS を `xformOp:translate` / `orient` / `scale` の timeSamples に。LINEAR / STEP / CUBICSPLINE
   （STEP は保持サンプル、CUBICSPLINE は 24fps でベイク）。`{ animation: index | name }` で選択
