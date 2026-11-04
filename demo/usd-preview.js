@@ -5,7 +5,7 @@
 // `warnings` so it is obvious when the preview, not the converter, is the limit.
 
 import * as THREE from "three";
-import { indexPrims } from "./usda-parser.js";
+import { indexPrims, primReferences } from "./usda-parser.js";
 
 export function buildUsdScene(layer, entries) {
   const warnings = [];
@@ -15,6 +15,7 @@ export function buildUsdScene(layer, entries) {
   const files = new Map(entries.map((e) => [e.name, e]));
   const textureCache = new Map();
   const materialCache = new Map();
+  const geometryCache = new Map(); // Mesh prim path → BufferGeometry (shared by instances)
   const objectUrls = [];
 
   const root = new THREE.Group();
@@ -33,6 +34,7 @@ export function buildUsdScene(layer, entries) {
 
   function buildPrim(prim) {
     if (prim.specifier === "class") return null;
+    prim = composeReferences(prim, 0);
     if (prim.type === "Material" || prim.type === "Shader") return null;
 
     let obj;
@@ -52,6 +54,32 @@ export function buildUsdScene(layer, entries) {
       if (c) obj.add(c);
     }
     return obj;
+  }
+
+  /**
+   * Minimal composition for internal references: the referenced prim's
+   * properties and children sit under the local opinions. External (asset)
+   * references are not resolved by this preview.
+   */
+  function composeReferences(prim, depth) {
+    const refs = primReferences(prim);
+    if (!refs.length) return prim;
+    if (depth > 8) { warn(`${prim.path}: references が深すぎるか循環している`); return prim; }
+    let type = prim.type;
+    const props = new Map();
+    const children = [];
+    for (const ref of refs) {
+      if (ref.asset) { warn(`外部ファイルへの reference (@${ref.asset}@) はプレビューでは読み込まない`); continue; }
+      const target = prims.get(ref.path);
+      if (!target) { warn(`${prim.path}: reference 先 ${ref.path} がない`); continue; }
+      const t = composeReferences(target, depth + 1);
+      type ||= t.type;
+      for (const [k, v] of t.props) if (!props.has(k)) props.set(k, v);
+      children.push(...t.children);
+    }
+    for (const [k, v] of prim.props) props.set(k, v);
+    children.push(...prim.children);
+    return { ...prim, type, props, children };
   }
 
   function applyXformOps(prim, obj) {
@@ -79,7 +107,16 @@ export function buildUsdScene(layer, entries) {
 
   // ---------- Mesh ----------
 
+  /** Instances of one prototype share geometry and material, like USD instancing. */
   function buildMesh(prim) {
+    const cached = geometryCache.get(prim.path);
+    if (cached) return new THREE.Mesh(cached.geometry, cached.material);
+    const obj = buildMeshUncached(prim);
+    if (obj.isMesh) geometryCache.set(prim.path, obj);
+    return obj;
+  }
+
+  function buildMeshUncached(prim) {
     const get = (n) => prim.props.get(n)?.value;
     const points = get("points");
     const counts = get("faceVertexCounts");

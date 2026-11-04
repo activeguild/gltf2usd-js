@@ -33,6 +33,7 @@ export function buildCubeGlb() {
  *  - an unsupported extension and a LINES primitive → options.onWarning
  *  - "UV1": baseColor from TEXCOORD_1 (= TEXCOORD_0 * 0.5, i.e. one quadrant)
  *  - "Transformed": KHR_texture_transform (offset / rotation / scale)
+ *  - a child node named like its parent's mesh prim (prim name collision)
  * The quadrant texture (red / green on top, blue / yellow at the bottom) makes
  * flips and rotations visible in the demo.
  * @returns {Uint8Array} GLB bytes
@@ -51,8 +52,9 @@ export function buildFeatureGlb() {
     nodes: [
       { name: "Clamped", mesh: 0 },
       { name: "Unlit", mesh: 1, translation: [1.5, 0, 0] },
-      { name: "UV1", mesh: 2, translation: [3, 0, 0] },
+      { name: "UV1", mesh: 2, translation: [3, 0, 0], children: [4] },
       { name: "Transformed", mesh: 3, translation: [4.5, 0, 0] },
+      { name: "CubeC" }, // same name as its parent's mesh prim → must be renamed
     ],
     meshes: [
       { name: "CubeA", primitives: [{ attributes: { POSITION: 0, NORMAL: 1, TEXCOORD_0: 2 }, indices: 3, material: 0 }] },

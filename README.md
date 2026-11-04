@@ -71,6 +71,7 @@ GLB を選ぶかドロップすると（またはサンプルボタンで）、�
 - sampler の wrapS / wrapT（REPEAT / CLAMP_TO_EDGE / MIRRORED_REPEAT → `repeat` / `clamp` / `mirror`）
 - TEXCOORD_1 以降（`primvars:st1` …）、テクスチャごとの `texCoord`
 - KHR_texture_transform（`UsdTransform2d`）
+- 複数ノードで共有されるメッシュの instancing（`/Root/Meshes` のプロトタイプを `instanceable` で参照。`{ instancing: false }` で複製）
 - `options.onWarning` で、変換で捨てた情報を通知（CLI は標準エラーに出力）
 - OpenUSD 26.x の全バリデータで error 0 を確認済み
 
@@ -87,7 +88,7 @@ GLB を選ぶかドロップすると（またはサンプルボタンで）、�
 ## ロードマップ
 
 1. ~~GLB パーサ + USDA + USDZ~~ ✅
-2. 共有メッシュの instancing（現在はノードごとに複製）、~~TEXCOORD_1~~ ✅、KHR_materials_* 拡張、~~KHR_texture_transform~~ ✅
+2. ~~共有メッシュの instancing~~ ✅、~~TEXCOORD_1~~ ✅、KHR_materials_* 拡張、~~KHR_texture_transform~~ ✅
 3. アニメーション → `timeSamples`
 4. スキン → UsdSkel、モーフターゲット → BlendShape
 5. USDC (Crate) バイナリ書き出し（`pxr/usd/usd/crateFile.cpp` を参照）

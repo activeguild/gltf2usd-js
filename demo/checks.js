@@ -2,7 +2,7 @@
 // Not a replacement for OpenUSD's validators (test/validate.py), but catches
 // the mistakes that are easy to make in a hand-written USDA writer.
 
-import { traverse, indexPrims } from "./usda-parser.js";
+import { traverse, indexPrims, primReferences } from "./usda-parser.js";
 
 /**
  * @param {ReturnType<import("./usdz-reader.js").readUsdz>} entries
@@ -52,6 +52,26 @@ export function runChecks(entries, layer) {
   }
   if (meshCount && !meshProblems) ok(`Mesh ${meshCount} 個: トポロジ / primvar / extent / binding に問題なし`);
   if (!meshCount) warn("Mesh がひとつもない");
+
+  // ---- References / instancing ----
+  let instances = 0;
+  let refProblems = 0;
+  for (const prim of traverse(layer.prims)) {
+    const refs = primReferences(prim);
+    if (prim.metadata.instanceable === true || prim.metadata.instanceable === 1) {
+      instances++;
+      if (!refs.length) { warn(`${prim.path}: instanceable なのに reference がない`); refProblems++; }
+    }
+    for (const ref of refs) {
+      if (ref.asset) {
+        if (!fileNames.has(ref.asset.replace(/^\.\//, ""))) { error(`${prim.path}: 参照ファイル ${ref.asset} がパッケージにない`); refProblems++; }
+      } else if (!prims.has(ref.path)) {
+        error(`${prim.path}: reference 先 ${ref.path} が存在しない`);
+        refProblems++;
+      }
+    }
+  }
+  if (instances && !refProblems) ok(`instance ${instances} 個: reference 先はすべて存在する`);
 
   // ---- Materials & shaders ----
   let shaderProblems = 0;

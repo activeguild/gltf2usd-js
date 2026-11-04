@@ -10,6 +10,8 @@ export { parseGLB, GltfAsset, gltfToUsda, packUsdz };
  * options.onWarning(msg): called once per kind of glTF data that was dropped
  *   (unsupported extensions, primitive modes, animations, unresolvable images, ...).
  * options.texturePrefix: folder for packaged textures (default "textures/").
+ * options.instancing: meshes used by several nodes become instanceable references
+ *   to a prototype under /Root/Meshes (default true; false duplicates them).
  */
 export function glbToUsda(input, options = {}) {
   const asset = new GltfAsset(parseGLB(toArrayBuffer(input)));

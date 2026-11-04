@@ -6,7 +6,7 @@ import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { glbToUsdz } from "../src/index.js";
 import { buildCubeGlb, buildFeatureGlb } from "../test/cube-glb.js";
 import { readUsdz } from "./usdz-reader.js";
-import { parseUsda, traverse } from "./usda-parser.js";
+import { parseUsda, traverse, primReferences } from "./usda-parser.js";
 import { runChecks } from "./checks.js";
 import { buildUsdScene } from "./usd-preview.js";
 
@@ -274,13 +274,20 @@ function showError(msg) {
 
 function renderStats({ glb, usdz, usdaText, ms, layer, entries }) {
   const counts = {};
-  if (layer) for (const p of traverse(layer.prims)) counts[p.type || "(typeless)"] = (counts[p.type || "(typeless)"] ?? 0) + 1;
+  let instances = 0;
+  if (layer) {
+    for (const p of traverse(layer.prims)) {
+      counts[p.type || "(typeless)"] = (counts[p.type || "(typeless)"] ?? 0) + 1;
+      if (p.metadata.instanceable) instances++;
+    }
+  }
   const items = [
     [fmtBytes(glb.length), "入力 GLB"],
     [fmtBytes(usdz.length), "USDZ"],
     [fmtBytes(new TextEncoder().encode(usdaText ?? "").length), "うち USDA"],
     [`${ms.toFixed(1)} ms`, "変換時間"],
     [counts.Mesh ?? 0, "Mesh"],
+    [instances, "インスタンス"],
     [counts.Material ?? 0, "Material"],
     [entries ? entries.length - 1 : 0, "テクスチャ"],
   ];
@@ -320,6 +327,8 @@ function renderTree(layer) {
     }
     if (p.type === "Shader") meta.push(String(p.props.get("info:id")?.value ?? ""));
     if (p.type === "Xform" && p.props.has("xformOpOrder")) meta.push(p.props.get("xformOpOrder").value.join(", "));
+    for (const r of primReferences(p)) meta.push(`${p.metadata.instanceable ? "instance of" : "ref"} ${r.asset ? `@${r.asset}@` : ""}${r.path ?? ""}`);
+    if (p.specifier === "class") meta.push("class（描画されない）");
     const kids = p.children.length ? `<ul>${p.children.map(node).join("")}</ul>` : "";
     return `<li><span class="type">${esc(p.type || "def")}</span><span class="name">${esc(p.name)}</span><span class="meta">${esc(meta.join(" · "))}</span>${kids}</li>`;
   };

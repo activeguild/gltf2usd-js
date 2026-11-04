@@ -4,6 +4,8 @@
 // Output layout:
 //   /Root                     (Xform, defaultPrim)
 //   /Root/Scene/<Node>/...    (Xform hierarchy; one Mesh prim per glTF primitive)
+//   /Root/Meshes/<Mesh>       (class; prototypes of meshes used by several nodes,
+//                              referenced from the nodes as instanceable prims)
 //   /Root/Materials/<Mat>     (Material + UsdPreviewSurface + UsdUVTexture shaders)
 
 const MODE_NAMES = ["POINTS", "LINES", "LINE_LOOP", "LINE_STRIP", "TRIANGLES", "TRIANGLE_STRIP", "TRIANGLE_FAN"];
@@ -49,11 +51,27 @@ export function gltfToUsda(asset, options = {}) {
   // Scene / node hierarchy
   const scene = ctx.json.scenes?.[ctx.json.scene ?? 0];
   const rootNodes = scene ? scene.nodes || [] : (ctx.json.nodes || []).map((_, i) => i);
+  ctx.prototypes = planPrototypes(ctx, rootNodes, options.instancing ?? true);
   lines.push('    def Xform "Scene"');
   lines.push("    {");
   const usedNames = new Set();
   for (const nodeIndex of rootNodes) writeNode(ctx, lines, nodeIndex, 2, usedNames, "/Root/Scene");
   lines.push("    }");
+
+  // Prototypes for meshes shared by several nodes. `class` keeps them out of
+  // the rendered scene; nodes reference them as instanceable prims.
+  if (ctx.prototypes.size) {
+    lines.push("");
+    lines.push('    class Xform "Meshes"');
+    lines.push("    {");
+    for (const [meshIndex, protoName] of ctx.prototypes) {
+      lines.push(`        def Xform "${protoName}"`);
+      lines.push("        {");
+      writeMeshPrims(ctx, lines, meshIndex, 3, new Set());
+      lines.push("        }");
+    }
+    lines.push("    }");
+  }
 
   // Materials
   const materials = ctx.json.materials || [];
@@ -115,19 +133,62 @@ function writeNode(ctx, lines, nodeIndex, depth, siblingNames, parentPath) {
     lines.push(`${ind}    uniform token[] xformOpOrder = ["xformOp:transform"]`);
   }
 
+  // Mesh prims and child nodes share one namespace under this Xform.
+  const names = new Set();
   if (node.mesh !== undefined) {
-    const mesh = ctx.json.meshes[node.mesh];
-    const primNames = new Set();
-    (mesh.primitives || []).forEach((prim, pi) => {
-      const base = sanitize(mesh.name, `Mesh_${node.mesh}`);
-      const primName = uniqueName(mesh.primitives.length > 1 ? `${base}_${pi}` : base, primNames);
-      writeMeshPrim(ctx, lines, prim, primName, depth + 1);
-    });
+    const protoName = ctx.prototypes.get(node.mesh);
+    if (protoName) {
+      const mesh = ctx.json.meshes[node.mesh];
+      const instName = uniqueName(sanitize(mesh.name, `Mesh_${node.mesh}`), names);
+      lines.push(`${ind}    def Xform "${instName}" (`);
+      lines.push(`${ind}        instanceable = true`);
+      lines.push(`${ind}        prepend references = </Root/Meshes/${protoName}>`);
+      lines.push(`${ind}    )`);
+      lines.push(`${ind}    {`);
+      lines.push(`${ind}    }`);
+    } else {
+      writeMeshPrims(ctx, lines, node.mesh, depth + 1, names);
+    }
   }
 
-  const childNames = new Set();
-  for (const child of node.children || []) writeNode(ctx, lines, child, depth + 1, childNames, path);
+  for (const child of node.children || []) writeNode(ctx, lines, child, depth + 1, names, path);
   lines.push(`${ind}}`);
+}
+
+/** One Mesh prim per glTF primitive. */
+function writeMeshPrims(ctx, lines, meshIndex, depth, names) {
+  const mesh = ctx.json.meshes[meshIndex];
+  const base = sanitize(mesh.name, `Mesh_${meshIndex}`);
+  (mesh.primitives || []).forEach((prim, pi) => {
+    const primName = uniqueName(mesh.primitives.length > 1 ? `${base}_${pi}` : base, names);
+    writeMeshPrim(ctx, lines, prim, primName, depth);
+  });
+}
+
+/**
+ * Meshes referenced by more than one node in the scene get a prototype under
+ * /Root/Meshes. Returns Map<meshIndex, prototypeName> in mesh index order.
+ */
+function planPrototypes(ctx, rootNodes, enabled) {
+  const prototypes = new Map();
+  if (!enabled) return prototypes;
+  const uses = new Map();
+  const visited = new Set();
+  const visit = (i) => {
+    if (visited.has(i) || !ctx.json.nodes?.[i]) return; // guard against malformed cyclic graphs
+    visited.add(i);
+    const node = ctx.json.nodes[i];
+    if (node.mesh !== undefined) uses.set(node.mesh, (uses.get(node.mesh) ?? 0) + 1);
+    for (const c of node.children || []) visit(c);
+  };
+  rootNodes.forEach(visit);
+  const used = new Set();
+  [...uses.keys()].sort((a, b) => a - b).forEach((meshIndex) => {
+    if (uses.get(meshIndex) < 2) return;
+    const mesh = ctx.json.meshes[meshIndex];
+    prototypes.set(meshIndex, uniqueName(sanitize(mesh.name, `Mesh_${meshIndex}`), used));
+  });
+  return prototypes;
 }
 
 function nodeMatrix(node) {

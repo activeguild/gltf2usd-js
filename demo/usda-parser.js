@@ -26,6 +26,19 @@ export function* traverse(prims) {
   }
 }
 
+/**
+ * Internal / external references of a prim, from any list-op flavour.
+ * @returns {{asset?: string, path?: string}[]}
+ */
+export function primReferences(prim) {
+  const out = [];
+  for (const key of ["references", "prepend references", "append references", "add references"]) {
+    const v = prim.metadata[key];
+    if (v) out.push(...(Array.isArray(v) ? v : [v]).filter(Boolean));
+  }
+  return out;
+}
+
 /** Build a Map<path, Prim> for path lookups. */
 export function indexPrims(layer) {
   const map = new Map();
@@ -267,7 +280,10 @@ class Parser {
     switch (t.t) {
       case "number": return t.v;
       case "string": return t.v;
-      case "asset": return { asset: t.v };
+      case "asset":
+        // A reference may be @asset@ followed by a prim path: @foo.usda@</Prim>
+        if (this.peek()?.t === "path") return { asset: t.v, path: this.next().v };
+        return { asset: t.v };
       case "path": return { path: t.v };
       case "ident":
         if (t.v === "None") return null;

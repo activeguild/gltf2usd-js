@@ -25,6 +25,14 @@ while (dv.getUint32(off, true) === 0x04034b50) {
 }
 assert(n === 2, "two entries");
 
+// ---- Instancing: the cube mesh is used by two nodes ----
+const count = (s, sub) => s.split(sub).length - 1;
+assert(usda.includes('class Xform "Meshes"'), "prototype scope is a class");
+assert(count(usda, 'def Mesh "Cube"') === 1, "shared mesh written once");
+assert(count(usda, "instanceable = true") === 2 && count(usda, "prepend references = </Root/Meshes/Cube>") === 2, "two instances");
+const flat = glbToUsda(glb, { instancing: false }).usda;
+assert(!flat.includes("Meshes") && count(flat, 'def Mesh "Cube"') === 2 && !flat.includes("instanceable"), "instancing: false duplicates");
+
 // ---- Stage 2 features (test/features.glb) ----
 const features = readFileSync(new URL("./features.glb", import.meta.url));
 const warnings = [];
@@ -68,6 +76,11 @@ assert(!f.usda.includes('"CubeB_1"'), "LINES primitive not written");
 
 // No onWarning → no throw, same output.
 assert(glbToUsda(features).usda === f.usda, "onWarning does not change output");
+
+// No mesh is shared in features.glb → no prototypes.
+assert(!f.usda.includes("Meshes"), "no prototypes without shared meshes");
+// Mesh prim and child node share a namespace.
+assert(f.usda.includes('def Mesh "CubeC"') && f.usda.includes('def Xform "CubeC_1"'), "mesh / child name collision resolved");
 
 // Cube has nothing to warn about.
 const cubeWarnings = [];
