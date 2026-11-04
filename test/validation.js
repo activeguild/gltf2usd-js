@@ -282,8 +282,30 @@ rejects(withJson((j) => { j.textures = ["t"]; }), /glTF textures\[0\] must be an
   assert(accepts(quantized((j) => { j.accessors.push(zeros("VEC2", 5122)); j.meshes[0].primitives[0].attributes.TEXCOORD_0 = 2; }), "quantized UV").includes("primvars:st"), "SHORT TEXCOORD_0 with KHR_mesh_quantization");
   rejects(attr("TEXCOORD_0", zeros("VEC2", 5122)), /TEXCOORD_0 \(accessor 2\) is SHORT \(allowed only with KHR_mesh_quantization\)/, "SHORT TEXCOORD_0 without the extension");
   rejects(attr("COLOR_0", zeros("VEC4", 5125)), /COLOR_0 \(accessor 2\) is UNSIGNED_INT/, "UNSIGNED_INT COLOR_0");
-  // Custom attributes are not type-checked.
-  assert(accepts(attr("_ID", zeros("SCALAR", 5125)), "custom attribute").includes("def Mesh"), "custom _ID attribute accepted");
+  // Application-specific (custom) mesh attributes: "_" prefix, no UNSIGNED_INT (glTF 2.0 § 3.7.2.1).
+  for (const [label, acc] of [["FLOAT", zeros("SCALAR", 5126)], ["UNSIGNED_BYTE", zeros("SCALAR", 5121)], ["UNSIGNED_SHORT", zeros("SCALAR", 5123)], ["normalized UNSIGNED_SHORT VEC4", zeros("VEC4", 5123, { normalized: true })]]) {
+    assert(accepts(attr("_ID", acc), `_ID ${label}`).includes("def Mesh"), `custom _ID ${label} accepted`);
+  }
+  rejects(attr("_ID", zeros("SCALAR", 5125)), /mesh 0 primitive 0: _ID \(accessor 2\) is UNSIGNED_INT, which custom attributes must not use/, "custom _ID UNSIGNED_INT");
+  rejects(attr("CUSTOM_ID", zeros("SCALAR")), /mesh 0 primitive 0: attribute "CUSTOM_ID" is not a glTF attribute semantic; custom attributes must start with "_"/, "custom attribute without underscore");
+  rejects(attr("BATCHID", zeros("SCALAR")), /attribute "BATCHID" is not a glTF attribute semantic/, "legacy BATCHID without underscore");
+  rejects(attr("texcoord_0", zeros("VEC2")), /attribute "texcoord_0" is not a glTF attribute semantic/, "lower-case semantic");
+  // Morph targets keep their own rules (unknown target names are not checked here).
+}
+
+// ---- normalized on any accessor ----
+{
+  const unused = (extra) => withJson((j) => { j.accessors.push({ componentType: 5126, count: 1, type: "SCALAR", ...extra }); });
+  rejects(unused({ normalized: true }), /accessor 2: FLOAT accessors must not be normalized/, "FLOAT normalized:true");
+  rejects(unused({ componentType: 5125, normalized: true }), /accessor 2: UNSIGNED_INT accessors must not be normalized/, "UNSIGNED_INT normalized:true");
+  rejects(unused({ normalized: "true" }), /accessor 2: normalized must be a boolean \(got "true"\)/, "normalized as a string");
+  rejects(unused({ normalized: 1 }), /normalized must be a boolean \(got 1\)/, "normalized as a number");
+  rejects(unused({ normalized: null }), /normalized must be a boolean \(got null\)/, "normalized null");
+  assert(accepts(unused({ normalized: false }), "FLOAT normalized:false").includes("def Mesh"), "FLOAT normalized:false accepted");
+  assert(accepts(unused({}), "FLOAT without normalized").includes("def Mesh"), "FLOAT without normalized accepted");
+  assert(accepts(unused({ componentType: 5125, normalized: false }), "UNSIGNED_INT normalized:false").includes("def Mesh"), "UNSIGNED_INT normalized:false accepted");
+  // Also when the accessor is used (POSITION FLOAT normalized).
+  rejects(withJson((j) => { j.accessors[0].normalized = true; }), /accessor 0: FLOAT accessors must not be normalized/, "used FLOAT accessor normalized");
 }
 
 // ---- JOINTS_n / WEIGHTS_n ----
@@ -424,7 +446,7 @@ rejects(withJson((j) => { j.meshes[0].primitives.push({ attributes: {} }); }), /
   rejects(instanced({ ROTATION: z("VEC3") }), /ROTATION \(accessor 2\) must be VEC4, not VEC3/, "ROTATION VEC3");
   rejects(instanced({ SCALE: z("VEC4") }), /SCALE \(accessor 2\) must be VEC3, not VEC4/, "SCALE VEC4");
   // Component types other than FLOAT (and the extension's normalized ROTATION forms).
-  rejects(instanced({ TRANSLATION: z("VEC3", 2, 5122, { normalized: true }) }), /TRANSLATION \(accessor 2\) is normalized SHORT \(allowed only with KHR_mesh_quantization\); allowed: FLOAT/, "normalized SHORT TRANSLATION");
+  rejects(instanced({ TRANSLATION: z("VEC3", 2, 5122, { normalized: true }) }), /TRANSLATION \(accessor 2\) is normalized SHORT; allowed: FLOAT$/, "normalized SHORT TRANSLATION");
   rejects(instanced({ SCALE: z("VEC3", 2, 5125) }), /SCALE \(accessor 2\) is UNSIGNED_INT; allowed: FLOAT/, "UNSIGNED_INT SCALE");
   rejects(instanced({ ROTATION: z("VEC4", 2, 5121, { normalized: true }) }), /ROTATION \(accessor 2\) is normalized UNSIGNED_BYTE; allowed: FLOAT, normalized BYTE, normalized SHORT/, "normalized UNSIGNED_BYTE ROTATION");
   rejects(instanced({ ROTATION: z("VEC4", 2, 5122) }), /ROTATION \(accessor 2\) is SHORT; allowed: FLOAT, normalized BYTE, normalized SHORT/, "unnormalized SHORT ROTATION");
@@ -454,7 +476,14 @@ rejects(withJson((j) => { j.meshes[0].primitives.push({ attributes: {} }); }), /
   assert(instances(accepts(instanced({ ROTATION: z("VEC4", 2), SCALE: z("VEC3", 2) }), "no TRANSLATION")) === 2, "TRANSLATION omitted");
   assert(instances(accepts(instanced({ TRANSLATION: z("VEC3", 2), ROTATION: z("VEC4", 2) }), "no SCALE")) === 2, "SCALE omitted");
   assert(instances(accepts(instanced({ ROTATION: z("VEC4", 2, 5120, { normalized: true }) }), "normalized BYTE ROTATION")) === 2, "normalized BYTE ROTATION (extension spec)");
-  assert(instances(accepts(instanced({ TRANSLATION: z("VEC3", 2, 5122) }, { quantization: true }), "quantized TRANSLATION")) === 2, "SHORT TRANSLATION with KHR_mesh_quantization");
+  // KHR_mesh_quantization does not extend TRANSLATION / SCALE (FLOAT only); ROTATION has the extension's own forms.
+  rejects(instanced({ TRANSLATION: z("VEC3", 2, 5122) }, { quantization: true }), new RegExp(`${W}: TRANSLATION \\(accessor 2\\) is SHORT; allowed: FLOAT$`), "SHORT TRANSLATION with KHR_mesh_quantization");
+  rejects(instanced({ SCALE: z("VEC3", 2, 5122) }, { quantization: true }), /SCALE \(accessor 2\) is SHORT; allowed: FLOAT$/, "SHORT SCALE with KHR_mesh_quantization");
+  rejects(instanced({ SCALE: z("VEC3", 2, 5120, { normalized: true }) }, { quantization: true }), /SCALE \(accessor 2\) is normalized BYTE; allowed: FLOAT$/, "normalized BYTE SCALE with KHR_mesh_quantization");
+  assert(instances(accepts(instanced({ TRANSLATION: z("VEC3", 2) }), "FLOAT TRANSLATION")) === 2, "FLOAT TRANSLATION");
+  assert(instances(accepts(instanced({ SCALE: z("VEC3", 2) }), "FLOAT SCALE")) === 2, "FLOAT SCALE");
+  assert(instances(accepts(instanced({ ROTATION: z("VEC4", 2, 5122, { normalized: true }) }), "normalized SHORT ROTATION")) === 2, "normalized SHORT ROTATION");
+  assert(instances(accepts(instanced({ ROTATION: z("VEC4", 2, 5120, { normalized: true }) }, { quantization: true }), "normalized BYTE ROTATION + quantization")) === 2, "normalized BYTE ROTATION with KHR_mesh_quantization declared");
   // The extension needs the node's mesh; attributes must not be empty.
   rejects(instanced({ TRANSLATION: z("VEC3") }, { mutate: (j) => { delete j.nodes[0].mesh; } }), new RegExp(`${W}: the node has no mesh to instance`), "instancing without node.mesh");
   rejects(instanced({ TRANSLATION: z("VEC3") }, { mutate: (j) => { j.nodes[0].mesh = 9; } }), /node 0: mesh 9 does not exist/, "instancing with an invalid mesh index");

@@ -216,10 +216,12 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
    （どこからも読まれない accessor でも検出する。meshopt で読めない view は読むときに確認）。
    以前は警告して正規化していた「normalized のない整数の COLOR_0」も、この規則でエラーになった。
    EXT_mesh_gpu_instancing: node.extensions / 拡張 / attributes はオブジェクト（attributes は必須で 1 つ以上、拡張を持つノードは mesh 必須）。TRANSLATION / SCALE は VEC3、
-   ROTATION は VEC4。componentType は FLOAT（ROTATION は拡張の仕様どおり normalized BYTE / SHORT も可、TRANSLATION / SCALE は
-   KHR_mesh_quantization が宣言されていれば整数も可）。全属性の count は同じ（`gpuInstanceCount()` の `Math.min()` による切り詰めは廃止し、
+   ROTATION は VEC4。componentType は FLOAT（ROTATION は拡張の仕様どおり normalized BYTE / SHORT も可）。TRANSLATION / SCALE は
+   KHR_mesh_quantization が宣言されていても FLOAT のみ（以前は整数を許していたが、指示により拡張の表どおりに絞った）。全属性の count は同じ（`gpuInstanceCount()` の `Math.min()` による切り詰めは廃止し、
    検証をすり抜けた不一致はエラー）。インスタンス属性の accessor の byteOffset は 4 の倍数（byteStride 付きの bufferView は可）。
-   独自属性は名前が `_` で始まり UNSIGNED_INT でないこと（§ 3.7.2.1。それ以外の名前・型はエラー）。
+   独自属性は名前が `_` で始まり UNSIGNED_INT でないこと（§ 3.7.2.1。それ以外の名前・型はエラー）。この規則は `checkAttribute()` に
+   まとめ、mesh の attributes と GPU インスタンスの両方に適用（morph target の未知の名前は対象外）。mesh の `_ID` も UNSIGNED_INT は不可。
+   accessor の `normalized` は boolean で、FLOAT / UNSIGNED_INT では true にできない（使われない accessor も含め全 accessor）。
    独自属性（`_ID` / `_COLOR` など）は参照・count・アライメントを検証したうえで USD には書かず、`warnCustomInstanceAttributes()` が
    ノードと属性ごとに 1 回警告する（インスタンス数は全属性共通の count のまま。独自属性だけならその count で恒等変換のインスタンス）。
    JSON の型: トップレベル配列の要素・primitive・target・sampler・channel はオブジェクト、children / scene.nodes / samplers / channels /

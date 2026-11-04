@@ -100,20 +100,32 @@ const TARGET_RULES = [
   { re: /^TEXCOORD_\d+$/, types: ["VEC2"], core: [[FLOAT, "f"]], quantized: [[BYTE, "n"], [BYTE, "i"], [UBYTE, "n"], [UBYTE, "i"], [SHORT, "n"], [SHORT, "i"], [USHORT, "n"], [USHORT, "i"]] },
   { re: /^COLOR_\d+$/, types: ["VEC3", "VEC4"], core: [[FLOAT, "f"]], quantized: [[BYTE, "n"], [BYTE, "i"], [UBYTE, "n"], [UBYTE, "i"], [SHORT, "n"], [SHORT, "i"], [USHORT, "n"], [USHORT, "i"]] },
 ];
-// EXT_mesh_gpu_instancing per-instance attributes: FLOAT, ROTATION also normalized BYTE / SHORT
-// (the extension's own table), TRANSLATION / SCALE also the KHR_mesh_quantization integers.
+// EXT_mesh_gpu_instancing per-instance attributes (the extension's table): TRANSLATION and
+// SCALE are FLOAT only, ROTATION FLOAT or normalized BYTE / SHORT. KHR_mesh_quantization
+// does not extend these.
 const INSTANCE_RULES = [
-  { re: /^TRANSLATION$/, types: ["VEC3"], core: [[FLOAT, "f"]], quantized: ANY_INT },
+  { re: /^TRANSLATION$/, types: ["VEC3"], core: [[FLOAT, "f"]], quantized: [] },
   { re: /^ROTATION$/, types: ["VEC4"], core: [[FLOAT, "f"], [BYTE, "n"], [SHORT, "n"]], quantized: [] },
-  { re: /^SCALE$/, types: ["VEC3"], core: [[FLOAT, "f"]], quantized: ANY_INT },
+  { re: /^SCALE$/, types: ["VEC3"], core: [[FLOAT, "f"]], quantized: [] },
 ];
 const COMPONENT_NAME = { [BYTE]: "BYTE", [UBYTE]: "UNSIGNED_BYTE", [SHORT]: "SHORT", [USHORT]: "UNSIGNED_SHORT", 5125: "UNSIGNED_INT", [FLOAT]: "FLOAT" };
 const formName = ([ct, kind]) => `${kind === "n" ? "normalized " : ""}${COMPONENT_NAME[ct]}`;
 
-/** Check one attribute accessor against its semantic's rules; unknown / custom names pass. */
-function checkAttribute(rules, name, acc, label, quantization, fail) {
+/**
+ * Check one attribute accessor against its semantic's rules. A name no rule matches is an
+ * application-specific attribute (glTF 2.0 § 3.7.2.1): it must start with "_" and must not
+ * use UNSIGNED_INT (`custom` = what the standard names are, for the message). With
+ * custom = null (morph targets) unknown names are not checked.
+ */
+function checkAttribute(rules, name, acc, label, quantization, fail, custom = null) {
   const rule = rules.find((r) => r.re.test(name));
-  if (!rule) return;
+  if (!rule) {
+    if (custom === null) return;
+    const owner = label.slice(0, label.lastIndexOf(`: ${name} (accessor `)); // "mesh 0 primitive 0" etc.
+    if (!name.startsWith("_")) fail(`${owner}: attribute "${name}" is not ${custom}; custom attributes must start with "_"`);
+    if (acc.componentType === 5125) fail(`${label} is UNSIGNED_INT, which custom attributes must not use`);
+    return;
+  }
   if (!rule.types.includes(acc.type)) fail(`${label} must be ${rule.types.join(" or ")}, not ${acc.type}`);
   const kind = acc.componentType === FLOAT ? "f" : acc.normalized ? "n" : "i";
   const allowed = quantization ? [...rule.core, ...rule.quantized] : rule.core;
@@ -217,6 +229,11 @@ export function validateDocument(json, limits) {
     if (!(acc?.componentType in COMPONENT_SIZE)) fail(`${where}: unsupported componentType ${acc?.componentType}`);
     if (!(acc.type in TYPE_COUNT)) fail(`${where}: unsupported type ${JSON.stringify(acc.type)}`);
     if (!isIndex(acc.count)) fail(`${where}: count must be a non-negative integer`);
+    // normalized is a boolean, and only integer types other than UNSIGNED_INT can be normalized.
+    if (acc.normalized !== undefined && typeof acc.normalized !== "boolean") fail(`${where}: normalized must be a boolean (got ${JSON.stringify(acc.normalized)})`);
+    if (acc.normalized && (acc.componentType === FLOAT || acc.componentType === 5125)) {
+      fail(`${where}: ${COMPONENT_NAME[acc.componentType]} accessors must not be normalized`);
+    }
     const n = TYPE_COUNT[acc.type];
     if (acc.count * n > limits.maxAccessorValues) {
       fail(`${where}: ${acc.count} × ${n} values exceed limits.maxAccessorValues (${limits.maxAccessorValues})`);
@@ -272,7 +289,7 @@ export function validateDocument(json, limits) {
       const attributes = object(p, "attributes", where);
       for (const [name, a] of Object.entries(attributes)) {
         ref(a, accessors, `${name} accessor`, where);
-        checkAttribute(ATTRIBUTE_RULES, name, accessors[a], `${where}: ${name} (accessor ${a})`, quantization, fail);
+        checkAttribute(ATTRIBUTE_RULES, name, accessors[a], `${where}: ${name} (accessor ${a})`, quantization, fail, "a glTF attribute semantic");
       }
       // POSITION is what the converter draws; without it there is no geometry to convert.
       if (attributes.POSITION === undefined) fail(`${where}: has no POSITION attribute`);
@@ -350,14 +367,7 @@ export function validateDocument(json, limits) {
       for (const [name, a] of Object.entries(attrs)) {
         ref(a, accessors, `${name} accessor`, iw);
         const label = `${iw}: ${name} (accessor ${a})`;
-        if (INSTANCE_RULES.some((r) => r.re.test(name))) {
-          checkAttribute(INSTANCE_RULES, name, accessors[a], label, quantization, fail);
-        } else {
-          // Application-specific attributes (glTF 2.0 § 3.7.2.1, which the extension follows):
-          // names start with "_", and UNSIGNED_INT is not allowed.
-          if (!name.startsWith("_")) fail(`${iw}: attribute "${name}" is not TRANSLATION / ROTATION / SCALE; custom attributes must start with "_"`);
-          if (accessors[a].componentType === 5125) fail(`${label} is UNSIGNED_INT, which custom attributes must not use`);
-        }
+        checkAttribute(INSTANCE_RULES, name, accessors[a], label, quantization, fail, "TRANSLATION / ROTATION / SCALE");
         instanceUse.add(a);
         if (instances === undefined) { instances = accessors[a].count; first = name; }
         if (accessors[a].count !== instances) fail(`${iw}: ${name} (accessor ${a}) has ${accessors[a].count} instances, ${first} has ${instances} (all attributes must have the same count)`);
