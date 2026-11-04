@@ -3,9 +3,23 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { glbToUsda, glbToUsdz } from "./src/index.js";
 
-const [input, output] = process.argv.slice(2);
+const USAGE = `usage: glb2usd <in.glb|in.gltf> <out.usdz|out.usda>
+
+Converts glTF 2.0 (.glb, or .gltf with its external files next to it) to USDZ, or to
+USDA text when the output name ends in .usda. Warnings about dropped data go to stderr.`;
+const args = process.argv.slice(2);
+if (args.includes("--help") || args.includes("-h")) {
+  console.log(USAGE);
+  process.exit(0);
+}
+if (args.includes("--version") || args.includes("-v")) {
+  const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8"));
+  console.log(pkg.version);
+  process.exit(0);
+}
+const [input, output] = args;
 if (!input || !output) {
-  console.error("usage: glb2usd <in.glb|in.gltf> <out.usdz|out.usda>");
+  console.error(USAGE);
   process.exit(1);
 }
 

@@ -1,170 +1,233 @@
-# gltf2usd.js
+# gltf2usd-js
 
-依存ゼロの GLB → USDA / USDZ 変換ライブラリ。ブラウザと Node の両方で動きます（ESM）。
+**English** | [日本語](README.ja.md)
 
-## 使い方
+Convert glTF 2.0 (`.glb` / `.gltf`) to USDZ or USDA, in the browser or in Node.js, with **zero dependencies**.
+
+- One ES module that runs the same everywhere: it only uses `ArrayBuffer`, `DataView` and `TextEncoder`.
+- The output is aimed at **Apple AR Quick Look**: iOS AR Quick Look and macOS Finder Quick Look were checked on device, including skeletal animation, node animation and vertex alpha.
+- Each output is checked with the OpenUSD 26.11 validators (0 errors). Before converting, the input is validated against the glTF 2.0 specification, and invalid files fail with a clear error.
 
 ```js
-import { glbToUsdz, glbToUsda } from "./src/index.js";
+import { glbToUsdz } from "gltf2usd-js";
 
-// Node
+const usdz = glbToUsdz(glbBytes); // Uint8Array, ready to save or to open in AR Quick Look
+```
+
+## Contents
+
+- [Install](#install)
+- [Usage](#usage) — [Node.js](#nodejs), [Browser](#browser), [CLI](#cli)
+- [API](#api)
+- [Supported glTF features](#supported-gltf-features)
+- [Limitations](#limitations)
+- [Viewer notes](#viewer-notes)
+- [Input validation](#input-validation)
+- [Demo](#demo)
+- [Development](#development)
+- [License](#license)
+
+## Install
+
+```bash
+npm install gltf2usd-js
+```
+
+Node.js 18 or later. In browsers, any modern browser that supports ES modules works.
+
+## Usage
+
+### Node.js
+
+```js
 import { readFileSync, writeFileSync } from "node:fs";
-writeFileSync("out.usdz", glbToUsdz(readFileSync("in.glb")));
+import { glbToUsdz } from "gltf2usd-js";
 
-// ブラウザ
-const buf = await file.arrayBuffer();           // <input type="file"> など
-const usdz = glbToUsdz(buf);                     // Uint8Array
+writeFileSync("model.usdz", glbToUsdz(readFileSync("model.glb")));
+```
+
+A `.gltf` file with external `.bin` and image files: pass the files in `resources`.
+
+```js
+import { glbToUsdz } from "gltf2usd-js";
+
+const usdz = glbToUsdz(readFileSync("scene.gltf", "utf8"), {
+  resources: {
+    "scene.bin": readFileSync("scene.bin"),
+    "textures/base.png": readFileSync("textures/base.png"),
+  },
+});
+```
+
+`resources` can be a `Map`, a plain object, or a function `(uri) => bytes`. Each uri is looked up as written, then percent-decoded, then by its bare file name.
+
+### Browser
+
+```js
+import { glbToUsdzAsync } from "gltf2usd-js";
+
+const file = input.files[0];                        // <input type="file">
+const usdz = await glbToUsdzAsync(await file.arrayBuffer());
 const url = URL.createObjectURL(new Blob([usdz], { type: "model/vnd.usdz+zip" }));
 
-// USDA テキストだけ欲しい場合
-const { usda, files } = glbToUsda(buf);          // files = テクスチャ等 {name, bytes}[]
+// AR Quick Look on iOS: <a rel="ar" href={url}><img ...></a>
+```
 
-// .gltf + 外部ファイル（.bin / 画像）。resources は Map / オブジェクト / (uri) => bytes のどれでもよい
-const usdz2 = glbToUsdz(gltfText, { resources: { "scene.bin": binBytes, "textures/base.png": pngBytes } });
+The async functions also convert WebP textures (`EXT_texture_webp`) to PNG or JPEG with the browser's own image decoder, because USDZ only holds PNG and JPEG. The synchronous functions (`glbToUsdz`, `glbToUsda`) work the same everywhere, but they drop WebP textures with a warning.
 
-// WebP テクスチャ（EXT_texture_webp）を PNG / JPEG に変換して入れる（非同期版。ブラウザでは標準機能で変換）
-const usdz3 = await glbToUsdzAsync(buf);
-// Node では変換関数を渡す（例: 画像ライブラリで WebP → PNG）。渡さなければ同期版と同じく警告してテクスチャなし
-await glbToUsdzAsync(buf, { convertImage: async (bytes, mimeType) => ({ bytes: await toPng(bytes), mimeType: "image/png" }) });
+### CLI
 
-// 変換で捨てた情報（未対応の拡張・プリミティブ・アニメーション等）を受け取る
-glbToUsdz(buf, { onWarning: (msg) => console.warn(msg) });
+```bash
+npx gltf2usd-js model.glb model.usdz
+```
 
-// 不正な入力は GltfValidationError、ZIP（非 ZIP64）に収まらない出力は UsdzLimitError
-import { GltfValidationError, UsdzLimitError, DEFAULT_LIMITS } from "./src/index.js";
+Write `model.usda` as the output to get USDA text instead. For `.gltf` input, the external files are read from the input's folder (and below it only). Warnings go to stderr. Once the package is installed, the command is called `glb2usd`.
+
+## API
+
+### Conversion functions
+
+| Function | Returns | |
+|---|---|---|
+| `glbToUsdz(input, options?)` | `Uint8Array` | USDZ package |
+| `glbToUsda(input, options?)` | `{ usda: string, files: { name, bytes }[] }` | USDA text plus the textures it references |
+| `glbToUsdzAsync(input, options?)` | `Promise<Uint8Array>` | Like `glbToUsdz`, but converts WebP textures first |
+| `glbToUsdaAsync(input, options?)` | `Promise<{ usda, files }>` | Like `glbToUsda`, but converts WebP textures first |
+
+`input` can be any of these: GLB or `.gltf` bytes (`ArrayBuffer` / `Uint8Array`), `.gltf` JSON text, or an already parsed glTF object.
+
+### Options
+
+| Option | Default | |
+|---|---|---|
+| `resources` | — | External files of a `.gltf` (see [Usage](#nodejs)) |
+| `onWarning(message)` | — | Called once for each kind of glTF data that could not be converted (unsupported extensions, primitive modes, extra animations, …) |
+| `animation` | `0` | Index or name of the glTF animation to convert. A USD stage has one timeline, so only one animation is written. |
+| `animationMode` | `"skeleton"` | `"skeleton"` writes node animation as a rigid UsdSkel skeleton, which AR Quick Look plays. `"xform"` writes time-sampled `xformOp`s instead, which AR Quick Look does not play. |
+| `instancing` | `true` | A mesh used by several nodes is written once and referenced as an instanceable prim. `false` duplicates it. |
+| `texturePrefix` | `"textures/"` | Folder of the packaged textures |
+| `layerName` | `"model.usda"` | File name of the root layer inside the USDZ |
+| `limits` | `DEFAULT_LIMITS` | Resource limits (see [Input validation](#input-validation)) |
+| `convertImage(bytes, mimeType)` | browser decoder | Async functions only. Returns `{ bytes, mimeType: "image/png" \| "image/jpeg" }` or `null`. In Node, pass your own (e.g. built on an image library). |
+
+### Errors
+
+| Error | When |
+|---|---|
+| `GltfValidationError` | The input is not valid glTF 2.0, or it exceeds `limits`. The message names the offending part, e.g. `mesh 0 primitive 1: NORMAL (accessor 4) has 3 elements, POSITION (accessor 2) has 4`. |
+| `UsdzLimitError` | The output does not fit a classic (non-ZIP64) zip: a file or the archive is 4 GiB or larger, there are more than 65535 entries, or an entry name is longer than 65535 bytes. |
+
+```js
+import { glbToUsdz, GltfValidationError } from "gltf2usd-js";
+
 try {
-  glbToUsdz(buf, { limits: { maxInputBytes: 200 * 2 ** 20 } }); // 上限は DEFAULT_LIMITS を上書き（Infinity で無効）
+  glbToUsdz(bytes, { onWarning: (m) => console.warn(m) });
 } catch (e) {
-  if (e instanceof GltfValidationError) console.error("glTF として不正:", e.message);
+  if (e instanceof GltfValidationError) console.error("Invalid glTF:", e.message);
   else throw e;
 }
 ```
 
-CLI: `node cli.js in.glb out.usdz`（`.usda` を指定すればテキスト出力。`in.gltf` なら同じフォルダの外部ファイルを読む）
+### Lower-level exports
 
-テスト: `npm test`（テスト用 GLB の生成も含む。ネットワーク不要）
+`parseGltf`, `parseGLB`, `GltfAsset` (parsing and accessor decoding), `gltfToStage` (glTF → an in-memory USD layer), `writeUsda` (layer → text), `packUsdz` (files → USDZ), `browserImageConverter`, `DEFAULT_LIMITS`, `DataUnavailableError`.
 
-結合テスト: `npm run test:integration`。Khronos glTF-Sample-Assets の 19 モデル（コミット固定、ファイルごとに SHA-256 を照合）を
-取得して `test/.cache/` に保存し、USDA / USDZ への変換、zip の読み戻し、主要な情報（メッシュ・マテリアル・テクスチャ・スケルトン・
-BlendShape・アニメーション・バリアント）が残っているかを確認します。`pip install usd-core` があれば OpenUSD のバリデータも実行します。
-`-- --offline` でキャッシュだけを使い、`-- Fox Box` でモデルを絞れます。
+## Supported glTF features
 
-## Web デモ（テストアプリ）
+**Geometry**
+- Node hierarchy with TRS or `matrix` transforms
+- TRIANGLES, TRIANGLE_STRIP and TRIANGLE_FAN, with or without indices
+- POSITION, NORMAL (flat normals when missing), TEXCOORD_n, COLOR_0
+- Sparse accessors, and normalized / matrix accessors (including the column padding of MAT2 / MAT3)
+- A mesh shared by several nodes becomes an instanceable reference to a single prototype
+
+**Materials** (UsdPreviewSurface)
+- Base color, metallic-roughness, normal, occlusion and emissive (factor and texture each), alphaMode BLEND / MASK, double-sided
+- PNG and JPEG textures, sampler wrap modes, multiple UV sets
+- Vertex alpha (`COLOR_0` VEC4) with BLEND / MASK materials. Quick Look cannot read per-vertex opacity directly, so it is written as an alpha ramp texture with a dedicated UV set.
+
+**Animation, skinning, morph targets** (UsdSkel)
+- Skins become Skeleton, SkelAnimation and joint influences (any number of JOINTS_n / WEIGHTS_n sets)
+- Morph targets become BlendShapes, with their weights as fixed values or animated
+- Node animation becomes a rigid skeleton (default) or xformOp time samples
+- LINEAR and STEP interpolation are exact; CUBICSPLINE is baked at 24 fps
+
+**Extensions**
+
+| Extension | Support |
+|---|---|
+| `KHR_texture_transform` | ✅ `UsdTransform2d` |
+| `KHR_materials_emissive_strength`, `KHR_materials_ior`, `KHR_materials_clearcoat` | ✅ |
+| `KHR_materials_unlit` | ✅ approximated (black diffuse + emission) |
+| `KHR_materials_variants` | ✅ a `materialVariant` variantSet |
+| `KHR_lights_punctual` | ✅ UsdLux (intensities copied as-is; AR Quick Look ignores lights) |
+| `KHR_mesh_quantization` | ✅ |
+| `EXT_meshopt_compression` | ✅ built-in decoder |
+| `EXT_mesh_gpu_instancing` | ✅ one instanceable reference per instance (custom `_` attributes are ignored, with a warning) |
+| `EXT_texture_webp` | ✅ async API only (converted to PNG / JPEG) |
+| `KHR_draco_mesh_compression` | ⚠️ the uncompressed fallback is used when the file has one; otherwise the primitive is skipped with a warning |
+| `KHR_meshopt_compression` | ❌ compressed data is skipped with a warning |
+
+## Limitations
+
+- **Vertex color RGB and materials:** On a mesh that has a material, the vertex color RGB is written as `displayColor` but is not multiplied into the material.
+- **Vertex alpha and base color textures:** Vertex alpha is not combined with a base color texture's alpha; the texture alpha is used. UsdPreviewSurface cannot multiply two inputs.
+- **Primitive modes:** POINTS and LINES primitives are skipped with a warning.
+- **Animations:** Only one animation is converted, chosen with `options.animation`.
+- **Not supported:** cameras, KHR_materials_transmission / volume / specular / sheen, KTX2 textures, USDC (binary) output, ZIP64.
+
+Everything that is dropped is reported through `onWarning`.
+
+## Viewer notes
+
+- **Tested viewers:** iOS AR Quick Look and macOS Finder Quick Look play the output, including skins, node animation and vertex alpha. The layout follows Apple's own samples: the default prim is the `SkelRoot`, and each `SkelAnimation` sits under its `Skeleton`.
+- **xformOp animation:** AR Quick Look does not play time-sampled xformOps. That is why node animation is written as a skeleton by default.
+- **Reality Converter:** It accepts only packages whose root layer is USDC. USDC output is not implemented yet.
+
+## Input validation
+
+Before converting, the input is checked against the glTF 2.0 specification. An invalid file throws `GltfValidationError`; nothing is silently zero-filled or truncated. The checks cover:
+
+- **GLB container:** the header, chunk layout and alignment, and that the length matches the input
+- **Buffers, buffer views and accessors:** byte ranges, strides and alignment; accessor counts and types; sparse accessors
+- **Meshes:** attribute types and counts, set numbering (`TEXCOORD_0`, `TEXCOORD_1`, …), JOINTS / WEIGHTS pairs, the element count required by each primitive mode, and reserved index values
+- **References:** between nodes, meshes, skins and animations; the node hierarchy must not contain cycles
+- **EXT_mesh_gpu_instancing attributes**
+
+Problems in purely visual data (a missing texture, light or variant) are reported as warnings instead, and the model still converts.
+
+`DEFAULT_LIMITS` protects memory and the stack, and can be raised or lowered with `options.limits`; `Infinity` disables a limit.
+
+| Limit | Default |
+|---|---|
+| `maxInputBytes` | 2 GiB |
+| `maxAccessorValues` | 2^26 values per accessor |
+| `maxNodeDepth` | 1024 |
+| `maxBuffers` / `maxBufferViews` / `maxAccessors` / `maxMeshes` / `maxNodes` | counts of these arrays |
+
+## Demo
 
 ```bash
-npm run demo        # http://localhost:8080/demo/ を開く
+git clone https://github.com/activeguild/gltf2usd-js.git
+cd gltf2usd-js
+npm run demo          # http://localhost:8080/demo/
 ```
 
-GLB を選ぶかドロップすると（またはサンプルボタンで）、ブラウザ内で USDZ に変換し、次を表示します。
+Drop a GLB onto the page to see the original glTF (three.js) and the converted USD side by side, together with structural checks, the USDA text and the prim tree. On iPhone and iPad, the result opens in AR Quick Look. The demo is static files only and deploys as-is, for example to Vercel or GitHub Pages. three.js is used by the demo only; the library itself has no dependencies.
 
-- 元の glTF（three.js GLTFLoader）と変換結果の USD を並べた 3D 表示（カメラは連動）
-- 出力の構造チェック: zip が無圧縮・64 バイト境界・CRC 一致、defaultPrim / upAxis、Mesh のトポロジと primvar の要素数、
-  `material:binding` と `MaterialBindingAPI`、シェーダ接続とテクスチャ参照、`inputs:varname` の型
-- USDA 本文、Prim ツリー、USDZ のエントリ一覧、入力 glTF の概要（未対応の拡張・アニメーションの有無）
-- USDZ / USDA のダウンロード、iPhone / iPad では AR Quick Look
+## Development
 
-右側の USD 表示は `demo/usda-parser.js` で USDA を読み直し、`demo/usd-preview.js` で three.js に組み立てる簡易プレビューです。
-`src/usda.js` とは独立に書いてあるので、出力を実際に読み戻した結果になります（OpenUSD のレンダラではありません）。
-デモだけ three.js を CDN（jsDelivr）から読み込みます。`src/` は引き続き依存ゼロです。
-静的ファイルだけで動くので、リポジトリのルートをそのまま公開すれば `/demo/` で使えます。
+```bash
+npm test                        # unit tests, no network
+npm run test:integration        # 19 Khronos glTF-Sample-Assets models (downloaded once, pinned by commit and SHA-256)
+pip install usd-core            # optional: lets the integration test and test/validate.py run the OpenUSD validators
+python3 test/validate.py model.usdz
+```
 
-- **Vercel**: リポジトリをインポートするだけ（Framework Preset は "Other"、ビルド不要）。`vercel.json` で `/` → `/demo/` に転送します。
-- **GitHub Pages**: ルートを公開ディレクトリにして `/demo/` を開きます。
+Design notes and the reasons behind the output layout are in [CLAUDE.md](CLAUDE.md) (in Japanese).
 
-## 構成
+## License
 
-| ファイル | 役割 |
-|---|---|
-| `src/glb.js`  | GLB コンテナ解析、accessor デコード（stride / normalized / sparse 対応）、画像抽出 |
-| `src/usda.js` | glTF → USDA。ノード階層 (Xform)、メッシュ (Mesh)、マテリアル (UsdPreviewSurface) |
-| `src/usdz.js` | USDZ パッケージャ（stored-only zip、64 バイトアライン、CRC32 自前実装） |
-| `src/index.js`| 公開 API |
-| `demo/`       | ブラウザ用テストアプリ（`npm run demo`） |
+[MIT](LICENSE) © activeguild
 
-## 現在対応しているもの（段階 1〜4）
-
-- GLB ヘッダ / JSON / BIN チャンク、data URI バッファ
-- `.gltf` と外部 `.bin` / 画像（`options.resources`）
-- ノード階層、TRS または matrix（`xformOp:transform`）
-- TRIANGLES / TRIANGLE_STRIP / TRIANGLE_FAN、インデックス有無どちらも可
-- POSITION / NORMAL / TEXCOORD_0（V 反転済み）/ COLOR_0（displayColor。VEC4 のアルファは BLEND / MASK のマテリアルで
-  `primvars:displayOpacity`。下の設計メモ）
-- 行列 accessor（MAT2 / MAT3 / MAT4）は列ごとの 4 バイト境界（パディング）を考慮して読む
-- `extent`、`MaterialBindingAPI`、`doubleSided`
-- マテリアル: baseColor (factor/texture)、metallicRoughness、normal、occlusion、emissive、alphaMode (BLEND/MASK)
-- テクスチャの USDZ 同梱（PNG / JPEG）。同名画像は `name_1.png` のように重複回避
-- EXT_texture_webp: `glbToUsdzAsync` / `glbToUsdaAsync` が WebP を PNG（透明あり）/ JPEG（不透明、品質 0.95）に変換して同梱。
-  ブラウザでは `createImageBitmap` + `OffscreenCanvas` を使い、Node では `options.convertImage` を渡したときだけ変換する
-- sampler の wrapS / wrapT（REPEAT / CLAMP_TO_EDGE / MIRRORED_REPEAT → `repeat` / `clamp` / `mirror`）
-- TEXCOORD_1 以降（`primvars:st1` …）、テクスチャごとの `texCoord`
-- KHR_texture_transform（`UsdTransform2d`）
-- KHR_materials_emissive_strength / ior / clearcoat（transmission などは未対応で警告）
-- KHR_mesh_quantization、KHR_materials_unlit（黒 diffuse + 発光で近似）
-- EXT_mesh_gpu_instancing（インスタンスごとの instanceable reference に展開。TRANSLATION / ROTATION / SCALE を使い、
-  `_ID` / `_COLOR` などの独自属性（名前は `_` で始まり、UNSIGNED_INT は不可）は検証したうえで USD には書かず、ノードと属性ごとに 1 回警告する。
-  TRANSLATION / SCALE は FLOAT のみ、ROTATION は FLOAT か normalized BYTE / SHORT。KHR_mesh_quantization はこれらを広げない）
-- KHR_materials_variants → variantSet（`default` + 各バリアント）
-- KHR_lights_punctual → UsdLux（DistantLight / SphereLight / ShapingAPI。強さは近似）
-- EXT_meshopt_compression（依存ゼロの自前デコーダ）
-- Draco（KHR_draco_mesh_compression）は非圧縮 fallback があれば使用、なければスキップして警告
-- アニメーション（1 本）: 既定ではノードのアニメーションもスケルトン（UsdSkel）に変換（AR Quick Look などは xformOp の
-  アニメーションを再生しないため）。`{ animationMode: "xform" }` で TRS を `xformOp:translate` / `orient` / `scale` の timeSamples に。LINEAR / STEP / CUBICSPLINE
-  （STEP は保持サンプル、CUBICSPLINE は 24fps でベイク）。`{ animation: index | name }` で選択
-- スキン → UsdSkel（SkelRoot / Skeleton / SkelAnimation、jointIndices / jointWeights）。スキンの入れ物は `/Root/Skins/Skin_<名前>`
-  （Mac の Quick Look は入れ物の名前が `Rig` だと再生しなかったため、glTF の名前をそのまま使わない）
-- モーフターゲット → BlendShape（ウェイトの固定値とアニメーション。スキンなしでも可）
-- 複数ノードで共有されるメッシュの instancing（`/Root/Meshes` のプロトタイプを `instanceable` で参照。`{ instancing: false }` で複製）
-- `options.onWarning` で、変換で捨てた情報を通知（CLI は標準エラーに出力）
-- 入力の検証（GLB のヘッダ / チャンク、buffer / bufferView / accessor の範囲、参照、ノード階層、スキン、アニメーション）と
-  リソース上限（`options.limits`）。不正な入力は `GltfValidationError`
-- USDZ の ZIP 上限（4 GiB・65535 エントリ・名前 65535 バイト）とエントリ名の検査。超える場合は `UsdzLimitError`（ZIP64 は未対応）
-- OpenUSD 26.x の全バリデータで error 0 を確認済み
-
-## 未対応（既知）
-
-- マテリアルがあるメッシュの頂点カラー RGB（glTF は baseColor に掛けるが、`displayColor` を書くだけでマテリアルには反映しない）
-- 頂点アルファとベースカラーテクスチャのアルファの掛け合わせ（テクスチャのアルファを使い、警告）
-- KHR_meshopt_compression（EXT_ 版のみ対応。KHR_ 版は未対応の拡張として警告）、Draco のデコード
-- EXT_mesh_gpu_instancing の独自インスタンス属性（`_ID` / `_COLOR` など。警告して無視）
-- KHR_materials_transmission / volume / specular / sheen など、カメラ、2 本目以降のアニメーション、USDC 出力、ZIP64
-
-## 設計メモ
-
-- glTF と USD はどちらも Y-up・右手系・メートル単位なので座標変換は不要。UV の V だけ反転。
-- glTF の column-major 行列は、USD の row-vector 規約で 4 行ずつ書くとそのまま一致する（平行移動が最終行）。
-- glTF の metallicRoughness テクスチャは G=roughness, B=metallic なので `outputs:g` / `outputs:b` をそれぞれ接続し、factor は `inputs:scale` で乗算。
-- 法線マップは `scale=(2,2,2,1)`, `bias=(-1,-1,-1,0)` で [0,1] → [-1,1] に展開。
-- KHR_texture_transform は V 反転後の st 空間に書き直すと `UsdTransform2d` と同じ形（scale → 回転 → 平行移動）になる。
-  平行移動だけ `(offset.x + sin·scale.y, 1 - offset.y - cos·scale.y)` に変換する。
-- USDZ は圧縮禁止・各ファイルのデータ先頭が 64 バイト境界必須。zip の extra field でパディングしている。
-  書き出す前に全エントリの位置を長さだけから計算し、32 ビット / 16 ビットのフィールドに収まらなければ書かずにエラーにする
-  （壊れた zip を作らないため。ZIP64 は Quick Look などの対応が不確かなので実装していない）。
-- **入力の検証**: データを読む・シーンをたどるのに使う参照とバイト範囲（buffer / bufferView / accessor / mesh / node / skin /
-  animation）、頂点属性の要素数（独自属性も含め POSITION と同じ）・TEXCOORD_n / COLOR_n / JOINTS_n / WEIGHTS_n の番号（0 から連続、先頭ゼロなし、9 桁まで）・type・componentType（KHR_mesh_quantization の整数型は宣言されているときだけ）、JOINTS_n / WEIGHTS_n の対、
-  POSITION の有無、モードごとの要素数（POINTS ≥ 1、LINES ≥ 2 かつ偶数、LINE_LOOP / LINE_STRIP ≥ 2、TRIANGLES ≥ 3 かつ 3 の倍数、
-  TRIANGLE_STRIP / FAN ≥ 3。インデックスがなければ頂点数）、インデックスの予約値（UNSIGNED_BYTE 255 / UNSIGNED_SHORT 65535 /
-  UNSIGNED_INT 4294967295 は使えない）、独自属性（名前は `_` で始まり、UNSIGNED_INT は不可）、accessor の normalized（boolean で、FLOAT / UNSIGNED_INT には付けられない）、
-  EXT_mesh_gpu_instancing の属性（型・count の一致・構造）、インデックス（型・値の範囲・上のモードごとの要素数）、accessor の count（1 以上の整数。使われない accessor も含む）、sparse の構造と昇順、accessor / sparse のアライメントと byteStride の使い方、
-  JSON の型（配列・オブジェクト）は変換前にすべて検査し、不正なら `GltfValidationError`（何番の何が不正かをメッセージに入れる）。0 埋めや切り詰めで
-  変換を続けることはしない。マテリアル / テクスチャ / 画像 / ライト / バリアントの不正な参照は、従来どおりその参照を無視して警告する
-  （見た目のデータで、無くても形は正しく出せるため）。アニメーションのキーが壊れている（時刻が減る、NaN、個数が合わない）チャンネルは
-  警告してスキップ、同じ時刻のキーは最後のものを残す（USD は 1 時刻に 1 値）。リソース上限の既定値（`DEFAULT_LIMITS`）は
-  メモリとスタックを守るためだけのもので、Khronos のサンプルや一般的な AR 用モデルよりずっと大きい。
-- **頂点アルファ**: glTF ではアルファ = baseColorFactor.a × テクスチャ.a × COLOR_0.a で、使われるのは alphaMode が BLEND / MASK の
-  ときだけ（OPAQUE と既定マテリアルでは無視）。Quick Look / AR Quick Look は、`inputs:opacity` を `UsdPrimvarReader_float`
-  （`displayOpacity` など）から取るマテリアルを完全に透明に描く（実機で確認）一方、UV の primvar で読むテクスチャは描ける。
-  そこで、頂点アルファ付きで使われる BLEND / MASK マテリアル（ベースカラーテクスチャなし）は、opacity を 256 × 1 のアルファの
-  ランプ画像（`textures/vertex_alpha_ramp.png`、× factor.a）から取り、メッシュには u = COLOR_0.a の UV（`primvars:vertexAlphaUV`）を書く。
-  UV は頂点カラーと同じく面内で線形補間されるので、見た目は頂点アルファと同じになる。そのマテリアルを使う頂点アルファなしのメッシュにも
-  u = 1 の UV を書く（primvar がないときの扱いに頼らない）。MASK は、Quick Look がしきい値を超えた部分も中途半端な不透明度で描くため、
-  cutoff / factor.a の位置で 0 から 1 に切り替わる階段のランプにして、残る部分を完全に不透明にする。UsdUVTexture では Nearest を指定できず
-  階段の境目に線形補間の中間値が出るので、階段は 4096 テクセルにして境目の帯を狭くし、帯の中央（しきい値 0.5）で切る。`primvars:displayOpacity`（COLOR_0.a × factor.a）も記録として書く。
-  UsdPreviewSurface は 2 つのテクスチャを掛け合わせられないので、ベースカラーテクスチャがあるときはそのアルファを使い、
-  頂点アルファは反映しない（警告）。頂点カラーの RGB は従来どおりマテリアルには反映しない（上の「未対応」）。
-## ロードマップ
-
-1. ~~GLB パーサ + USDA + USDZ~~ ✅
-2. ~~共有メッシュの instancing~~ ✅、~~TEXCOORD_1~~ ✅、KHR_materials_* 拡張（~~emissive_strength / ior / clearcoat~~ ✅）、~~KHR_texture_transform~~ ✅
-3. ~~アニメーション → `timeSamples`~~ ✅（1 本のみ。複数クリップの扱いは検討中）
-4. ~~スキン → UsdSkel、モーフターゲット → BlendShape~~ ✅
-5. USDC (Crate) バイナリ書き出し（`pxr/usd/usd/crateFile.cpp` を参照）
+The output is plain USD. "OpenUSD" and "Pixar" are used here only to name the format and its reference validator; this project is not affiliated with them.

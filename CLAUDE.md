@@ -31,7 +31,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
 | `src/png.js` | `encodeGrayAlphaPng()` | 変換器が自分で作るテクスチャ（頂点アルファのランプ）用の小さな PNG 書き出し |
 | `src/usdz.js` | `packUsdz(entries)` → `Uint8Array`、`planLayout()`、`UsdzLimitError` | stored-only zip、64 バイトアライン、CRC32 自前。ZIP の上限とエントリ名を書く前に検査 |
 | `src/index.js`| `glbToUsda()`, `glbToUsdz()`, `gltfToUsda()`, `glbToUsdaAsync()`, `glbToUsdzAsync()` | 公開 API。名前は glb だが `.gltf` も受け付ける。Async 版は WebP などの画像を変換してから変換する |
-| `cli.js`      | `node cli.js in.glb\|in.gltf out.usdz\|out.usda` | `.gltf` の外部ファイルは同じフォルダ以下からのみ読む |
+| `cli.js`      | `node cli.js in.glb\|in.gltf out.usdz\|out.usda`（`--help` / `--version`） | `.gltf` の外部ファイルは同じフォルダ以下からのみ読む。npm の bin は `glb2usd` |
 | `test/cube-glb.js` | テスト用 GLB をメモリ上で生成（Node / ブラウザ共用） | `buildCubeGlb()`（段階 1）、`buildFeatureGlb()`（段階 2）、`buildAnimatedGlb()`（段階 3）、`buildSkinnedGlb()`（段階 4）、`buildCubeGltf()` |
 | `test/make-glb.js` | 上記を `test/*.glb` と `test/gltf/`（外部ファイル付き .gltf）に書き出す | |
 | `test/png.js` | テスト画像用の小さな PNG エンコーダ | |
@@ -336,6 +336,15 @@ npm run demo                               # 見た目の確認: サンプルと
 - 最低限: Bootstrap ヘッダ、TOC、`TOKENS` / `STRINGS` / `FIELDS` / `FIELDSETS` / `PATHS` / `SPECS` セクション、
   インライン値 vs 参照値、配列の圧縮（整数配列は LZ4 + 差分圧縮。LZ4 も自前で書く必要あり）
 - まず usda と同じ内容を usdc で出して `usdcat` で round-trip 比較する
+
+## npm 公開・README
+
+- パッケージ名 `gltf2usd-js`、MIT（著作権者 activeguild、`LICENSE`）。`package.json` の `files` で公開するのは `src/`・`cli.js`・
+  `README.md`・`README.ja.md`・`LICENSE` だけ（test / demo / CLAUDE.md は含めない）。`exports` は `.` と `./package.json` のみ。
+  bin は `glb2usd`（1 つだけなので `npx gltf2usd-js in.glb out.usdz` でも動く）。`prepublishOnly` で `npm test`。Node は 18 以上。
+- 公開前の確認: `npm pack --dry-run` で中身を見て、tarball を空のプロジェクトに入れて `import "gltf2usd-js"` と `npx glb2usd` を試す。
+- **README は英語（`README.md`）が既定、日本語は `README.ja.md`。** 先頭の言語リンクで切り替える。内容を変えたら両方を同じように直す。
+  README は外部の利用者向け（インストール・使い方・API・対応機能・制限・ビューア・検証・デモ・開発）。設計の経緯はこの CLAUDE.md に書く。
 
 ## コーディング規約
 
