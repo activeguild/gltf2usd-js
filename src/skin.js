@@ -129,7 +129,9 @@ function buildPlan(ctx, skinIndex, skin, parent, world) {
     return ibm ? invert(Array.from(ibm.slice(i * 16, i * 16 + 16))) : [...IDENTITY];
   });
 
-  const name = uniqueName(sanitize(skin.name, `Skin_${skinIndex}`), ctx.skinNames);
+  // Always prefixed: Mac Quick Look did not play a skin whose SkelRoot-side container was
+  // named "Rig" (renaming only that prim made it play), so glTF names are not used bare here.
+  const name = uniqueName(skin.name ? `Skin_${sanitize(skin.name, "")}` : `Skin_${skinIndex}`, ctx.skinNames);
   return { index: skinIndex, name, joints, tokens, remap, bind, prefix, users: [] };
 }
 

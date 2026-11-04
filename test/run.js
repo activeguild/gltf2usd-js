@@ -203,29 +203,29 @@ assert(f.usda.includes('def Mesh "CubeC"') && f.usda.includes('def Xform "CubeC_
   const w = [];
   const k = glbToUsda(readFileSync(new URL("./skinned.glb", import.meta.url)), { onWarning: (m) => w.push(m) }).usda;
   // Sections are searched from `base` on (the Blob's own Skeleton comes first in the file).
-  const rigAt = k.indexOf('def Xform "Rig"');
+  const rigAt = k.indexOf('def Xform "Skin_Rig"');
   const section = (from, to, base = rigAt) => {
     const i = k.indexOf(from, base);
     return k.slice(i, to ? k.indexOf(to, i) : undefined);
   };
   const skel = section('def Skeleton "Skeleton"', "def SkelAnimation");
   const bar = section('def Mesh "Bar"', 'def BlendShape "Bulge"');
-  assert(k.includes('def Scope "Skins"') && k.includes('def Xform "Rig"') && k.includes('def SkelRoot "Root"') && count(k, "def SkelRoot") === 1, "skins under the single /Root SkelRoot");
+  assert(k.includes('def Scope "Skins"') && k.includes('def Xform "Skin_Rig"') && k.includes('def SkelRoot "Root"') && count(k, "def SkelRoot") === 1, "skins under the single /Root SkelRoot");
   // Parent-first joint order even though skin.joints lists the child first.
   assert(skel.includes('uniform token[] joints = ["Lower", "Lower/Upper"]'), "joint tokens parent-first");
   // bindTransforms = inverse(IBM); rest of the root joint includes the non-joint Armature translation.
   assert(skel.includes("bindTransforms = [( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0.5, 0, 0, 1) ), ( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0.5, 1, 0, 1) )]"), "bindTransforms");
   assert(skel.includes("restTransforms = [( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0.5, 0, 0, 1) ), ( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 1, 0, 1) )]"), "restTransforms (root includes Armature)");
-  assert(skel.includes("rel skel:animationSource = </Root/Skins/Rig/Skeleton/Animation>"), "animation source");
+  assert(skel.includes("rel skel:animationSource = </Root/Skins/Skin_Rig/Skeleton/Animation>"), "animation source");
   // Joint indices remapped to skeleton order; zero-weight slots point at joint 0.
   assert(bar.includes("primvars:skel:jointIndices = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0,"), "jointIndices remapped");
   assert(bar.includes("elementSize = 4") && bar.includes('prepend apiSchemas = ["SkelBindingAPI", "MaterialBindingAPI"]'), "elementSize / SkelBindingAPI (+ default material)");
-  assert(bar.includes("rel skel:skeleton = </Root/Skins/Rig/Skeleton>"), "mesh bound to skeleton");
+  assert(bar.includes("rel skel:skeleton = </Root/Skins/Skin_Rig/Skeleton>"), "mesh bound to skeleton");
   assert(!section('def Xform "BarNode"', 'def Xform "Blob"', 0).includes("def Mesh"), "skinned mesh is not left under its node");
   // Sparse morph target on the skinned mesh, driven by the shared SkelAnimation.
   const bulge = section('def BlendShape "Bulge"', "}");
   assert(bulge.includes("uniform int[] pointIndices = [8, 9, 10, 11]") && bulge.includes("uniform vector3f[] offsets = [(-0.3, 0, -0.3),"), "sparse BlendShape");
-  assert(bar.includes('uniform token[] skel:blendShapes = ["Bar_Bulge"]') && bar.includes("rel skel:blendShapeTargets = </Root/Skins/Rig/Bar/Bulge>"), "mesh blend shape list");
+  assert(bar.includes('uniform token[] skel:blendShapes = ["Bar_Bulge"]') && bar.includes("rel skel:blendShapeTargets = </Root/Skins/Skin_Rig/Bar/Bulge>"), "mesh blend shape list");
   const anim = section('def SkelAnimation "Animation"', 'def Mesh "Bar"');
   assert(anim.includes('uniform token[] blendShapes = ["Bar_Bulge"]') && anim.includes("24: [1],"), "animated blend shape weights");
   assert(anim.includes('uniform token[] joints = ["Lower", "Lower/Upper"]') && anim.includes("quatf[] rotations.timeSamples"), "joint animation");
