@@ -5,10 +5,11 @@ import { gltfToStage } from "./convert.js";
 import { writeUsda } from "./usda.js";
 import { packUsdz, UsdzLimitError } from "./usdz.js";
 import { Layer, Prim } from "./ir.js";
+import { imagesToConvert, browserImageConverter, isUsdzImage } from "./images.js";
 
 export {
   parseGLB, parseGltf, GltfAsset, resolveResource, gltfToStage, writeUsda, packUsdz, Layer, Prim,
-  GltfValidationError, DataUnavailableError, DEFAULT_LIMITS, UsdzLimitError,
+  GltfValidationError, DataUnavailableError, DEFAULT_LIMITS, UsdzLimitError, browserImageConverter,
 };
 
 /** GltfAsset → { usda, files }: gltfToStage (glTF → USD IR) followed by writeUsda (IR → text). */
@@ -48,8 +49,41 @@ export function glbToUsda(input, options = {}) {
 
 /** Same input and options as glbToUsda → USDZ bytes (Uint8Array). */
 export function glbToUsdz(input, options = {}) {
+  return packUsda(glbToUsda(input, options), options);
+}
+
+/**
+ * Like glbToUsda, but first converts texture images that USDZ cannot hold (e.g. WebP from
+ * EXT_texture_webp) to PNG / JPEG:
+ * options.convertImage(bytes, mimeType) → Promise<{ bytes, mimeType: "image/png" | "image/jpeg" } | null>.
+ * The default uses the browser (createImageBitmap + OffscreenCanvas; see images.js); in Node
+ * pass your own (e.g. one built on an image library). Images it cannot convert are dropped
+ * with a warning, as in glbToUsda.
+ */
+export async function glbToUsdaAsync(input, options = {}) {
+  const asset = new GltfAsset(parseInput(input, options), { resources: options.resources, limits: options.limits });
+  const convert = options.convertImage ?? browserImageConverter;
+  const imageOverrides = new Map();
+  for (const index of imagesToConvert(asset)) {
+    const img = asset.imageBytes(index);
+    let result = null;
+    try {
+      result = await convert(img.bytes, img.mimeType);
+    } catch (e) {
+      options.onWarning?.(`Image ${index} (${img.mimeType}) could not be converted: ${e.message}`);
+    }
+    if (isUsdzImage(result)) imageOverrides.set(index, result);
+  }
+  return gltfToUsda(asset, { ...options, imageOverrides });
+}
+
+/** Same input and options as glbToUsdaAsync → USDZ bytes (Uint8Array). */
+export async function glbToUsdzAsync(input, options = {}) {
+  return packUsda(await glbToUsdaAsync(input, options), options);
+}
+
+function packUsda({ usda, files }, options) {
   const layerName = options.layerName ?? "model.usda";
-  const { usda, files } = glbToUsda(input, options);
   return packUsdz([{ name: layerName, bytes: new TextEncoder().encode(usda) }, ...files]);
 }
 

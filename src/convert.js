@@ -66,6 +66,8 @@ export function gltfToStage(asset, options = {}) {
     files: [],            // extra files to package: { name, bytes }
     imageNames: new Map(), // image index -> file name
     usedFileNames: new Set(),
+    // Image index → { bytes, mimeType } replacing images USDZ cannot hold (glbToUsdzAsync).
+    imageOverrides: options.imageOverrides ?? new Map(),
     warn: makeWarn(options.onWarning),
     meshPrimPaths: new Map(), // "mesh:primitive" → USD paths of its Mesh prims
   };
@@ -183,11 +185,18 @@ function makeWarn(onWarning) {
   };
 }
 
+/** Image indices that textures use through EXT_texture_webp. */
+function webpSources(json) {
+  return (json.textures || []).map((t) => t.extensions?.EXT_texture_webp?.source).filter((i) => i !== undefined);
+}
+
 /** Report document-level features that the converter drops. */
 function reportUnsupported(ctx) {
   const { json, warn } = ctx;
   for (const ext of json.extensionsUsed || []) {
     if (SUPPORTED_EXTENSIONS.has(ext)) continue;
+    // EXT_texture_webp is usable once every WebP image was converted (glbToUsdzAsync).
+    if (ext === "EXT_texture_webp" && webpSources(json).every((i) => ctx.imageOverrides.has(i))) continue;
     const required = (json.extensionsRequired || []).includes(ext);
     warn(`Extension ${ext}${required ? " (required)" : ""} is not supported; its data is ignored`);
   }
@@ -1039,11 +1048,13 @@ function textureFile(ctx, texInfo) {
     ctx.warn(`Texture ${texInfo.index} does not exist; ignored`);
     return null;
   }
-  if (tex.source === undefined) {
+  // EXT_texture_webp without a PNG / JPEG source: usable when the WebP image was converted.
+  const source = tex.source ?? tex.extensions?.EXT_texture_webp?.source;
+  if (source === undefined) {
     ctx.warn(`Texture ${texInfo.index} has no PNG/JPEG source (image extensions are not supported); ignored`);
     return null;
   }
-  const file = imageFile(ctx, tex.source);
+  const file = imageFile(ctx, source);
   if (!file) return null;
   const sampler = tex.sampler !== undefined ? ctx.json.samplers?.[tex.sampler] ?? {} : {};
   return {
@@ -1066,12 +1077,13 @@ function wrapMode(ctx, glMode) {
 function imageFile(ctx, imgIndex) {
   if (ctx.imageNames.has(imgIndex)) return ctx.imageNames.get(imgIndex);
   const image = ctx.json.images?.[imgIndex];
-  const img = image && ctx.asset.imageBytes(imgIndex);
+  const img = image && (ctx.imageOverrides.get(imgIndex) ?? ctx.asset.imageBytes(imgIndex));
   let fileName = null;
   if (!img) {
     ctx.warn(`Image ${imgIndex} could not be resolved${image?.uri ? ` (uri: ${image.uri.slice(0, 64)})` : ""}; texture ignored`);
   } else if (img.mimeType !== "image/png" && img.mimeType !== "image/jpeg") {
-    ctx.warn(`Image ${imgIndex} has unsupported type ${img.mimeType ?? "(unknown)"}; USDZ allows PNG and JPEG only`);
+    ctx.warn(`Image ${imgIndex} has unsupported type ${img.mimeType ?? "(unknown)"}; USDZ allows PNG and JPEG only` +
+      " (glbToUsdzAsync converts it in browsers, or with options.convertImage)");
   } else {
     const ext = img.mimeType === "image/jpeg" ? "jpg" : "png";
     const base = sanitize(image.name, `image_${imgIndex}`);

@@ -10,7 +10,7 @@ npm パッケージ名: `gltf2usd-js`。
 
 ## 現在の状態（段階 1〜4 完了。要相談事項は「要相談」を参照）
 
-`src/` 12 ファイル。テスト GLB（`cube.glb`、`features.glb`、`animated.glb`、`skinned.glb`、外部ファイル付き `gltf/cube.gltf`）と
+`src/` 13 ファイル。テスト GLB（`cube.glb`、`features.glb`、`animated.glb`、`skinned.glb`、外部ファイル付き `gltf/cube.gltf`）と
 Khronos サンプル（BoxTextured / CesiumMilkTruck / DamagedHelmet / BoxAnimated / InterpolationTest / RiggedSimple / RiggedFigure /
 CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 の全 30 バリデータに通して error 0 を確認済み。
 
@@ -27,16 +27,18 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
 | `src/names.js` | `sanitize()`, `uniqueName()` | prim 名・ジョイント名 |
 | `src/ir.js` | `Layer` / `Prim`（`attr()` / `rel()` / `child()`） | USD 側のプリム・属性ツリー。値の表現規約は冒頭コメント |
 | `src/usda.js` | `writeUsda(layer)` → USDA 文字列 | 型名から書式を決める。timeSamples 対応 |
+| `src/images.js` | `imagesToConvert()`, `browserImageConverter()` | USDZ に入れられない画像（WebP）の変換。非同期 API（`glbToUsdzAsync`）から使う |
 | `src/png.js` | `encodeGrayAlphaPng()` | 変換器が自分で作るテクスチャ（頂点アルファのランプ）用の小さな PNG 書き出し |
 | `src/usdz.js` | `packUsdz(entries)` → `Uint8Array`、`planLayout()`、`UsdzLimitError` | stored-only zip、64 バイトアライン、CRC32 自前。ZIP の上限とエントリ名を書く前に検査 |
-| `src/index.js`| `glbToUsda()`, `glbToUsdz()`, `gltfToUsda()` | 公開 API。名前は glb だが `.gltf` も受け付ける |
+| `src/index.js`| `glbToUsda()`, `glbToUsdz()`, `gltfToUsda()`, `glbToUsdaAsync()`, `glbToUsdzAsync()` | 公開 API。名前は glb だが `.gltf` も受け付ける。Async 版は WebP などの画像を変換してから変換する |
 | `cli.js`      | `node cli.js in.glb\|in.gltf out.usdz\|out.usda` | `.gltf` の外部ファイルは同じフォルダ以下からのみ読む |
 | `test/cube-glb.js` | テスト用 GLB をメモリ上で生成（Node / ブラウザ共用） | `buildCubeGlb()`（段階 1）、`buildFeatureGlb()`（段階 2）、`buildAnimatedGlb()`（段階 3）、`buildSkinnedGlb()`（段階 4）、`buildCubeGltf()` |
 | `test/make-glb.js` | 上記を `test/*.glb` と `test/gltf/`（外部ファイル付き .gltf）に書き出す | |
 | `test/png.js` | テスト画像用の小さな PNG エンコーダ | |
 | `test/meshopt-vectors.js` | meshopt のテストベクトル（meshoptimizer のエンコーダで生成した入力とリファレンス出力） | 依存なしでデコーダを検証するため |
 | `test/run.js` | JS 側の単体テスト（prim 名、zip アライン検証） | `npm test` |
-| `test/validation.js` / `accessor.js` / `color.js` / `usdz.js` / `edge-cases.js` | 入力検証、行列 accessor、頂点カラー / アルファ、USDZ の上限、アニメーション / スキンの境界値 | `npm test`（`usdz.js` 以外はブラウザでも動く） |
+| `test/validation.js` / `accessor.js` / `color.js` / `usdz.js` / `edge-cases.js` | 入力検証、行列 accessor、頂点カラー / アルファ、USDZ の上限、アニメーション / スキンの境界値 | `npm test`（`usdz.js` 以外はブラウザでも動く。`images.js` も） |
+| `test/images.js` | WebP 画像の扱い（同期版は警告、非同期版は `convertImage` で変換） | `npm test` |
 | `test/gltf-builder.js` | テスト用に glTF / GLB を組み立てる小さなヘルパ | |
 | `test/integration/` | Khronos glTF-Sample-Assets（コミット固定、SHA-256 照合）の 19 モデルで変換・zip・内容・OpenUSD 検証 | `npm run test:integration`（ネットワーク。`-- --offline` でキャッシュのみ） |
 | `test/validate.py` | OpenUSD で開いてバリデータ実行 | `pip install usd-core` が必要 |
@@ -109,6 +111,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
 - COLOR_0 の VEC4 アルファ → BLEND / MASK のマテリアルでアルファのランプ画像 + `primvars:vertexAlphaUV`（設計判断 20）
 - 行列 accessor（MAT2 / MAT3）の列ごとの 4 バイト境界
 - USDZ の ZIP 上限（設計判断 21）。超える場合は `UsdzLimitError`
+- EXT_texture_webp（設計判断 22）: `glbToUsdzAsync` が WebP を PNG / JPEG に変換。デモはこちらを使う
 
 ### 未対応（既知）
 - マテリアルがあるメッシュの頂点カラー RGB（`displayColor` は書くがマテリアルに掛けない。glTF は baseColor に掛ける）
@@ -212,7 +215,14 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
 21. **USDZ の ZIP 上限は書く前に検査する。** `planLayout()` が長さだけから全オフセットを計算し、32 / 16 ビットのフィールドに収まらなければ
    `UsdzLimitError`（"USDZ exceeds supported ZIP size limits"）。エントリ名は相対・スラッシュ区切り・`.` `..` 空セグメントなし・
    大文字小文字を無視して一意、先頭は .usda / .usdc / .usd。出力バイトは変更前と同一。
-
+22. **WebP は非同期 API で変換する。** USDZ は PNG / JPEG しか入れられない。WebP のデコードは依存ゼロでは重いので、
+   `glbToUsdzAsync` / `glbToUsdaAsync` が `options.convertImage(bytes, mimeType)` で先に変換し、結果を `imageOverrides` として
+   同期の変換に渡す（同期 API は従来どおり警告してテクスチャなし）。既定の変換はブラウザの `createImageBitmap` + `OffscreenCanvas`
+   （透明な画素があれば PNG、なければ JPEG 品質 0.95。元の WebP が非可逆なので PNG にすると何倍も大きくなる）。
+   Node には WebP デコーダがないので、`convertImage` を渡さない限り変換しない（CLI も同じ）。変換結果が PNG / JPEG でないか、
+   失敗した画像は警告して捨てる。EXT_texture_webp の「未対応」警告は、WebP の画像がすべて変換できたときだけ出さない。
+   ユーザー提供の Fox_optimized.glb（gltf-transform、1024² の非可逆 WebP、PNG の代替なし）で、Chromium での変換結果が
+   OpenUSD のバリデータで error 0、デモの左右が一致。KTX2（KHR_texture_basisu）はブラウザでもデコードできないので対象外。
 
 ## OpenUSD バリデータに指摘されて直した点（再発注意）
 

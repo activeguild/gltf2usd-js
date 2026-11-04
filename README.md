@@ -22,6 +22,11 @@ const { usda, files } = glbToUsda(buf);          // files = テクスチャ等 {
 // .gltf + 外部ファイル（.bin / 画像）。resources は Map / オブジェクト / (uri) => bytes のどれでもよい
 const usdz2 = glbToUsdz(gltfText, { resources: { "scene.bin": binBytes, "textures/base.png": pngBytes } });
 
+// WebP テクスチャ（EXT_texture_webp）を PNG / JPEG に変換して入れる（非同期版。ブラウザでは標準機能で変換）
+const usdz3 = await glbToUsdzAsync(buf);
+// Node では変換関数を渡す（例: 画像ライブラリで WebP → PNG）。渡さなければ同期版と同じく警告してテクスチャなし
+await glbToUsdzAsync(buf, { convertImage: async (bytes, mimeType) => ({ bytes: await toPng(bytes), mimeType: "image/png" }) });
+
 // 変換で捨てた情報（未対応の拡張・プリミティブ・アニメーション等）を受け取る
 glbToUsdz(buf, { onWarning: (msg) => console.warn(msg) });
 
@@ -88,6 +93,8 @@ GLB を選ぶかドロップすると（またはサンプルボタンで）、�
 - `extent`、`MaterialBindingAPI`、`doubleSided`
 - マテリアル: baseColor (factor/texture)、metallicRoughness、normal、occlusion、emissive、alphaMode (BLEND/MASK)
 - テクスチャの USDZ 同梱（PNG / JPEG）。同名画像は `name_1.png` のように重複回避
+- EXT_texture_webp: `glbToUsdzAsync` / `glbToUsdaAsync` が WebP を PNG（透明あり）/ JPEG（不透明、品質 0.95）に変換して同梱。
+  ブラウザでは `createImageBitmap` + `OffscreenCanvas` を使い、Node では `options.convertImage` を渡したときだけ変換する
 - sampler の wrapS / wrapT（REPEAT / CLAMP_TO_EDGE / MIRRORED_REPEAT → `repeat` / `clamp` / `mirror`）
 - TEXCOORD_1 以降（`primvars:st1` …）、テクスチャごとの `texCoord`
 - KHR_texture_transform（`UsdTransform2d`）

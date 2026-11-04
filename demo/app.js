@@ -5,7 +5,7 @@ import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 // Reference decoder for the glTF view only; the converter has its own (src/meshopt.js).
 import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 
-import { glbToUsdz, parseGltf, resolveResource } from "../src/index.js";
+import { glbToUsdzAsync, parseGltf, resolveResource } from "../src/index.js";
 import { buildAnimatedGlb, buildCubeGlb, buildCubeGltf, buildFeatureGlb, buildSkinnedGlb } from "../test/cube-glb.js";
 import { readUsdz } from "./usdz-reader.js";
 import { parseUsda, traverse, primReferences } from "./usda-parser.js";
@@ -287,7 +287,8 @@ async function run(glb, name, resources = new Map()) {
   let usdz, ms;
   try {
     const t0 = performance.now();
-    usdz = glbToUsdz(glb, { resources, onWarning: (msg) => converterWarnings.push(msg) });
+    // Async: WebP textures (EXT_texture_webp) are converted to PNG / JPEG by the browser.
+    usdz = await glbToUsdzAsync(glb, { resources, onWarning: (msg) => converterWarnings.push(msg) });
     ms = performance.now() - t0;
   } catch (err) {
     const hint = /was not provided/.test(err.message) ? "\n.gltf が参照する .bin / 画像も一緒に選んでください。" : "";
