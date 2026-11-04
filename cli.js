@@ -25,9 +25,16 @@ const resources = (uri) => {
 
 const options = { resources, onWarning: (msg) => console.warn(`warning: ${msg}`) };
 const data = readFileSync(input);
-if (output.endsWith(".usda")) {
-  writeFileSync(output, glbToUsda(data, options).usda);
-} else {
-  writeFileSync(output, glbToUsdz(data, options));
+let out;
+try {
+  out = output.endsWith(".usda") ? glbToUsda(data, options).usda : glbToUsdz(data, options);
+} catch (e) {
+  // Invalid input / limits: a one-line message; anything else is a bug, so keep the stack.
+  if (e.name === "GltfValidationError" || e.name === "UsdzLimitError") {
+    console.error(`error: ${e.message}`);
+    process.exit(1);
+  }
+  throw e;
 }
+writeFileSync(output, out);
 console.log(`wrote ${output}`);

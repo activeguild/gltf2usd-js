@@ -1,5 +1,8 @@
 // GLB (glTF 2.0 binary) parser. Zero dependencies, works in browser and Node.
 import { decodeMeshopt } from "./meshopt.js";
+import { GltfValidationError, COMPONENT_SIZE, TYPE_COUNT, elementLayout, resolveLimits, validateDocument } from "./validate.js";
+
+export { GltfValidationError };
 // Spec: https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#glb-file-format-specification
 
 const GLB_MAGIC = 0x46546c67; // "glTF"
@@ -15,52 +18,80 @@ const COMPONENT_INFO = {
   5126: { ctor: Float32Array, size: 4, norm: (v) => v },
 };
 
-const TYPE_COUNT = {
-  SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4, MAT2: 4, MAT3: 9, MAT4: 16,
-};
 
 /**
  * Parse either a GLB or a .gltf (JSON text) ArrayBuffer into { json, bin }.
  * bin is the GLB BIN chunk as a Uint8Array, or null.
+ * options.limits.maxInputBytes bounds the input size (see DEFAULT_LIMITS).
  */
-export function parseGltf(arrayBuffer) {
+export function parseGltf(arrayBuffer, { limits } = {}) {
+  checkInputSize(arrayBuffer.byteLength, limits);
   if (arrayBuffer.byteLength >= 4 && new DataView(arrayBuffer).getUint32(0, true) === GLB_MAGIC) {
-    return parseGLB(arrayBuffer);
+    return parseGLB(arrayBuffer, { limits });
   }
   let json;
   try {
     json = JSON.parse(new TextDecoder().decode(arrayBuffer));
-  } catch {
-    throw new Error("Input is neither a GLB nor glTF JSON");
+  } catch (e) {
+    throw new GltfValidationError(`Input is neither a GLB nor glTF JSON (${e.message})`);
   }
   return { json, bin: null };
 }
 
+function checkInputSize(byteLength, limits) {
+  const max = resolveLimits(limits).maxInputBytes;
+  if (byteLength > max) throw new GltfValidationError(`Input is ${byteLength} bytes, more than limits.maxInputBytes (${max})`);
+}
+
 /**
  * Parse a GLB ArrayBuffer into { json, bin } where bin is a Uint8Array (may be null).
+ * The header and chunk layout are checked against the GLB spec: totalLength equals the
+ * input size, chunks are 4-byte aligned and inside the input, the first chunk is the
+ * only JSON chunk, a BIN chunk (at most one) comes second. Unknown chunks are skipped.
  */
-export function parseGLB(arrayBuffer) {
+export function parseGLB(arrayBuffer, { limits } = {}) {
+  checkInputSize(arrayBuffer.byteLength, limits);
+  const fail = (msg) => { throw new GltfValidationError(msg); };
+  if (arrayBuffer.byteLength < 12) fail(`GLB is ${arrayBuffer.byteLength} bytes, shorter than its 12-byte header`);
   const dv = new DataView(arrayBuffer);
-  if (dv.getUint32(0, true) !== GLB_MAGIC) throw new Error("Not a GLB file (bad magic)");
+  if (dv.getUint32(0, true) !== GLB_MAGIC) fail("Invalid GLB magic");
   const version = dv.getUint32(4, true);
-  if (version !== 2) throw new Error(`Unsupported GLB version ${version}`);
+  if (version !== 2) fail(`Unsupported GLB version ${version}`);
   const totalLength = dv.getUint32(8, true);
+  if (totalLength !== arrayBuffer.byteLength) {
+    fail(`GLB totalLength does not match input size (header says ${totalLength} bytes, input is ${arrayBuffer.byteLength})`);
+  }
+  if (totalLength < 20) fail("GLB has no room for a JSON chunk");
 
   let offset = 12;
   let json = null;
   let bin = null;
-  while (offset < totalLength) {
+  for (let index = 0; offset < totalLength; index++) {
+    if (offset + 8 > totalLength) fail(`GLB chunk ${index} header is truncated at byte ${offset}`);
     const chunkLength = dv.getUint32(offset, true);
     const chunkType = dv.getUint32(offset + 4, true);
+    if (offset + 8 + chunkLength > totalLength) {
+      fail(`GLB chunk exceeds input bounds (chunk ${index} at byte ${offset} is ${chunkLength} bytes, input is ${totalLength})`);
+    }
+    if (chunkLength % 4 !== 0) fail(`GLB chunk ${index} length ${chunkLength} is not a multiple of 4`);
     const chunkData = new Uint8Array(arrayBuffer, offset + 8, chunkLength);
     if (chunkType === CHUNK_JSON) {
-      json = JSON.parse(new TextDecoder().decode(chunkData));
-    } else if (chunkType === CHUNK_BIN && bin === null) {
+      if (index !== 0) fail(json ? "GLB has more than one JSON chunk" : "GLB JSON chunk must be the first chunk");
+      try {
+        json = JSON.parse(new TextDecoder().decode(chunkData));
+      } catch (e) {
+        fail(`GLB JSON chunk is not valid JSON (${e.message})`);
+      }
+    } else if (index === 0) {
+      fail("GLB JSON chunk must be the first chunk");
+    } else if (chunkType === CHUNK_BIN) {
+      if (bin) fail("GLB has more than one BIN chunk");
+      if (index !== 1) fail("GLB BIN chunk must be the second chunk");
       bin = chunkData;
-    }
+    } // other chunk types: skipped, as the spec requires
     offset += 8 + chunkLength;
   }
-  if (!json) throw new Error("GLB has no JSON chunk");
+  if (!json) fail("GLB has no JSON chunk");
   return { json, bin };
 }
 
@@ -84,11 +115,15 @@ export class GltfAsset {
    * @param {{json: object, bin: Uint8Array|null}} parsed
    * @param {object} [options]
    * @param {ResourceSource} [options.resources]  external files referenced by uri (see resolveResource)
+   * @param {object} [options.limits]  resource limits (see DEFAULT_LIMITS in validate.js)
+   * Throws GltfValidationError when the document is not valid glTF 2.0 (see validate.js).
    */
-  constructor({ json, bin }, { resources } = {}) {
+  constructor({ json, bin }, { resources, limits } = {}) {
     this.json = json;
     this.bin = bin;
     this._resources = resources;
+    this.limits = resolveLimits(limits);
+    validateDocument(json, this.limits);
     this._buffers = (json.buffers || []).map((b, i) => this._loadBuffer(b, i));
     this._decodedViews = new Map(); // EXT_meshopt_compression results by bufferView index
   }
@@ -97,16 +132,21 @@ export class GltfAsset {
     if (buffer.uri === undefined) {
       // EXT_meshopt_compression: a "fallback" buffer has no data; its views must be decoded.
       if (buffer.extensions?.EXT_meshopt_compression?.fallback) return null;
-      if (index !== 0 || !this.bin) throw new Error(`Buffer ${index} has no uri and no GLB BIN chunk`);
-      return this.bin;
+      if (index !== 0 || !this.bin) throw new GltfValidationError(`Buffer ${index} has no uri and no GLB BIN chunk`);
+      return this._checkBufferSize(this.bin, buffer, index, "GLB BIN chunk");
     }
-    if (buffer.uri.startsWith("data:")) return decodeDataUri(buffer.uri);
+    if (typeof buffer.uri !== "string") throw new GltfValidationError(`buffer ${index}: uri must be a string`);
+    if (buffer.uri.startsWith("data:")) return this._checkBufferSize(decodeDataUri(buffer.uri), buffer, index, `Buffer ${index} data URI`);
     const bytes = resolveResource(this._resources, buffer.uri);
     if (!bytes) {
       throw new Error(`External buffer "${buffer.uri}" was not provided (pass it in options.resources)`);
     }
-    if (bytes.byteLength < (buffer.byteLength ?? 0)) {
-      throw new Error(`External buffer "${buffer.uri}" is ${bytes.byteLength} bytes, expected ${buffer.byteLength}`);
+    return this._checkBufferSize(bytes, buffer, index, `External buffer "${buffer.uri}"`);
+  }
+
+  _checkBufferSize(bytes, buffer, index, label = `Buffer ${index}`) {
+    if (bytes.byteLength < buffer.byteLength) {
+      throw new GltfValidationError(`${label} is ${bytes.byteLength} bytes, but buffer ${index} byteLength is ${buffer.byteLength}`);
     }
     return bytes;
   }
@@ -129,6 +169,9 @@ export class GltfAsset {
       } catch (e) {
         throw new DataUnavailableError(`bufferView ${index}: ${e.message}`);
       }
+      if (bytes.byteLength !== bv.byteLength) {
+        throw new DataUnavailableError(`bufferView ${index}: EXT_meshopt_compression decoded ${bytes.byteLength} bytes, byteLength is ${bv.byteLength}`);
+      }
       this._decodedViews.set(index, bytes);
       return bytes;
     }
@@ -142,41 +185,42 @@ export class GltfAsset {
    * Returns { data: Array<number>, count, numComponents }.
    */
   accessor(index) {
-    const acc = this.json.accessors[index];
+    const acc = this.json.accessors?.[index];
+    if (!acc) throw new GltfValidationError(`accessor ${JSON.stringify(index)} does not exist`);
     const info = COMPONENT_INFO[acc.componentType];
-    if (!info) throw new Error(`Unknown componentType ${acc.componentType}`);
     const numComponents = TYPE_COUNT[acc.type];
     const count = acc.count;
     const data = new Array(count * numComponents).fill(0);
+    // Component byte offsets within an element; matrix columns are 4-byte aligned.
+    const layout = elementLayout(acc.componentType, acc.type);
 
     if (acc.bufferView !== undefined) {
       const bv = this.json.bufferViews[acc.bufferView];
       const view = this._viewData(acc.bufferView);
       const base = view.byteOffset + (acc.byteOffset || 0);
-      const elemSize = info.size * numComponents;
-      const stride = bv.byteStride || elemSize;
+      const stride = bv.byteStride || layout.size;
       const dv = new DataView(view.buffer);
       const reader = componentReader(dv, acc.componentType);
       for (let i = 0; i < count; i++) {
         const elemBase = base + i * stride;
         for (let c = 0; c < numComponents; c++) {
-          let v = reader(elemBase + c * info.size);
+          let v = reader(elemBase + layout.offsets[c]);
           if (acc.normalized) v = info.norm(v);
           data[i * numComponents + c] = v;
         }
       }
     }
 
-    if (acc.sparse) this._applySparse(acc, data, numComponents, info);
+    if (acc.sparse) this._applySparse(index, acc, data, numComponents, info, layout);
     return { data, count, numComponents };
   }
 
-  _applySparse(acc, data, numComponents, info) {
+  _applySparse(index, acc, data, numComponents, info, layout) {
     const s = acc.sparse;
     const idxView = this._viewData(s.indices.bufferView);
     const idxDv = new DataView(idxView.buffer);
     const idxReader = componentReader(idxDv, s.indices.componentType);
-    const idxSize = COMPONENT_INFO[s.indices.componentType].size;
+    const idxSize = COMPONENT_SIZE[s.indices.componentType];
     const idxBase = idxView.byteOffset + (s.indices.byteOffset || 0);
 
     const valView = this._viewData(s.values.bufferView);
@@ -184,10 +228,16 @@ export class GltfAsset {
     const valReader = componentReader(valDv, acc.componentType);
     const valBase = valView.byteOffset + (s.values.byteOffset || 0);
 
+    let previous = -1;
     for (let i = 0; i < s.count; i++) {
       const target = idxReader(idxBase + i * idxSize);
+      // The spec requires strictly increasing indices below count.
+      if (target >= acc.count || target <= previous) {
+        throw new GltfValidationError(`Invalid sparse accessor indices: accessor ${index} sparse index ${i} is ${target} (previous ${previous}, count ${acc.count})`);
+      }
+      previous = target;
       for (let c = 0; c < numComponents; c++) {
-        let v = valReader(valBase + (i * numComponents + c) * info.size);
+        let v = valReader(valBase + i * layout.size + layout.offsets[c]);
         if (acc.normalized) v = info.norm(v);
         data[target * numComponents + c] = v;
       }
@@ -262,15 +312,21 @@ function componentReader(dv, componentType) {
 
 function decodeDataUri(uri) {
   const comma = uri.indexOf(",");
+  if (comma < 0) throw new GltfValidationError("Malformed data URI (no comma)");
   const meta = uri.slice(0, comma);
   const payload = uri.slice(comma + 1);
-  if (!meta.endsWith(";base64")) throw new Error("Only base64 data URIs are supported");
+  if (!meta.endsWith(";base64")) throw new GltfValidationError("Only base64 data URIs are supported");
   return base64ToBytes(payload);
 }
 
 // atob is available in browsers and Node >= 16; src/ must not use Node's Buffer.
 function base64ToBytes(b64) {
-  const s = atob(b64);
+  let s;
+  try {
+    s = atob(b64);
+  } catch {
+    throw new GltfValidationError("Data URI is not valid base64");
+  }
   const out = new Uint8Array(s.length);
   for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
   return out;

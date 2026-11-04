@@ -519,6 +519,9 @@ function buildMeshPrimData(ctx, parent, prim, name, skel, gltfMesh) {
   const triCount = indices.length / 3;
 
   const hasMaterial = prim.material !== undefined && ctx.json.materials?.[prim.material];
+  if (prim.material !== undefined && !hasMaterial) {
+    ctx.warn(`Mesh "${name}": material ${prim.material} does not exist; the glTF default material is used`);
+  }
   // A primitive whose material only comes from KHR_materials_variants still needs the binding API.
   const variantMapped = !!prim.extensions?.KHR_materials_variants?.mappings?.length;
   const skinning = !skel?.plan ? null

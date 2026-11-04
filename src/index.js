@@ -1,11 +1,15 @@
 // Public API: works in browsers and Node (ESM).
-import { parseGLB, parseGltf, GltfAsset, resolveResource } from "./glb.js";
+import { parseGLB, parseGltf, GltfAsset, resolveResource, DataUnavailableError } from "./glb.js";
+import { GltfValidationError, DEFAULT_LIMITS } from "./validate.js";
 import { gltfToStage } from "./convert.js";
 import { writeUsda } from "./usda.js";
 import { packUsdz } from "./usdz.js";
 import { Layer, Prim } from "./ir.js";
 
-export { parseGLB, parseGltf, GltfAsset, resolveResource, gltfToStage, writeUsda, packUsdz, Layer, Prim };
+export {
+  parseGLB, parseGltf, GltfAsset, resolveResource, gltfToStage, writeUsda, packUsdz, Layer, Prim,
+  GltfValidationError, DataUnavailableError, DEFAULT_LIMITS,
+};
 
 /** GltfAsset → { usda, files }: gltfToStage (glTF → USD IR) followed by writeUsda (IR → text). */
 export function gltfToUsda(asset, options = {}) {
@@ -31,9 +35,14 @@ export function gltfToUsda(asset, options = {}) {
  * options.animationMode: "skeleton" (default) writes node animation as UsdSkel
  *   (animated subtrees become joints, meshes bound rigidly), which AR Quick Look-style
  *   viewers play; "xform" writes time-sampled translate / orient / scale xformOps.
+ * options.limits: resource limits, e.g. { maxInputBytes, maxAccessorValues, maxNodeDepth }
+ *   (defaults in DEFAULT_LIMITS; Infinity disables one).
+ *
+ * Invalid input (not glTF 2.0, references or byte ranges out of bounds, limits exceeded)
+ * throws GltfValidationError with the offending index in the message.
  */
 export function glbToUsda(input, options = {}) {
-  const asset = new GltfAsset(parseInput(input), { resources: options.resources });
+  const asset = new GltfAsset(parseInput(input, options), { resources: options.resources, limits: options.limits });
   return gltfToUsda(asset, options);
 }
 
@@ -44,11 +53,17 @@ export function glbToUsdz(input, options = {}) {
   return packUsdz([{ name: layerName, bytes: new TextEncoder().encode(usda) }, ...files]);
 }
 
-function parseInput(input) {
-  if (typeof input === "string") return { json: JSON.parse(input), bin: null };
-  if (input instanceof ArrayBuffer) return parseGltf(input);
+function parseInput(input, { limits } = {}) {
+  if (typeof input === "string") {
+    try {
+      return { json: JSON.parse(input), bin: null };
+    } catch (e) {
+      throw new GltfValidationError(`glTF JSON text is not valid JSON (${e.message})`);
+    }
+  }
+  if (input instanceof ArrayBuffer) return parseGltf(input, { limits });
   if (ArrayBuffer.isView(input)) {
-    return parseGltf(input.buffer.slice(input.byteOffset, input.byteOffset + input.byteLength));
+    return parseGltf(input.buffer.slice(input.byteOffset, input.byteOffset + input.byteLength), { limits });
   }
   if (input && typeof input === "object" && input.asset) return { json: input, bin: null };
   throw new Error("Expected GLB / glTF bytes (ArrayBuffer or Uint8Array), glTF JSON text, or a glTF object");
