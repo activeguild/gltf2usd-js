@@ -1,0 +1,5 @@
+node_modules/
+test/cube.glb
+*.usdz
+*.usda
+!test/fixtures/*
