@@ -92,7 +92,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
 - スキン → `/Root/Skins/Skin_<Skin>`（Xform。`/Root` が SkelRoot）に Skeleton（子に SkelAnimation）/ メッシュ。JOINTS_n / WEIGHTS_n すべて（elementSize = 4n）
 - モーフターゲット → Mesh 子の `BlendShape`（offsets / normalOffsets、疎なら pointIndices）。スキンなしのメッシュは
   ノードの下に専用 SkelRoot（ジョイント 0 個の Skeleton）。ウェイトは node.weights / mesh.weights と weights アニメーション
-- EXT_mesh_gpu_instancing → インスタンスごとに `xformOp:transform`（T·R·S）付きの Xform。メッシュのプロトタイプへの
+- EXT_mesh_gpu_instancing → インスタンスごとに `xformOp:transform`（T·R·S）付きの Xform（独自属性は警告して無視）。メッシュのプロトタイプへの
   instanceable reference（`instancing: false` なら複製）。PointInstancer は AR Quick Look 等での対応が不確かなので使っていない。
   Khronos SimpleInstancing（125 個）で three.js の InstancedMesh とワールド行列が 5e-7 以内で一致
 - KHR_materials_variants → `/Root` の variantSet `materialVariant`（`default` + glTF の各バリアント、既定の選択は `default`）。
@@ -215,10 +215,12 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
    sparse / indices / values はオブジェクト、sparse の indices は GltfAsset の生成時に読んで、昇順・重複なし・count 未満を確認する
    （どこからも読まれない accessor でも検出する。meshopt で読めない view は読むときに確認）。
    以前は警告して正規化していた「normalized のない整数の COLOR_0」も、この規則でエラーになった。
-   EXT_mesh_gpu_instancing: node.extensions / 拡張 / attributes はオブジェクト（attributes は必須）。TRANSLATION / SCALE は VEC3、
+   EXT_mesh_gpu_instancing: node.extensions / 拡張 / attributes はオブジェクト（attributes は必須で 1 つ以上、拡張を持つノードは mesh 必須）。TRANSLATION / SCALE は VEC3、
    ROTATION は VEC4。componentType は FLOAT（ROTATION は拡張の仕様どおり normalized BYTE / SHORT も可、TRANSLATION / SCALE は
    KHR_mesh_quantization が宣言されていれば整数も可）。全属性の count は同じ（`gpuInstanceCount()` の `Math.min()` による切り詰めは廃止し、
    検証をすり抜けた不一致はエラー）。インスタンス属性の accessor の byteOffset は 4 の倍数（byteStride 付きの bufferView は可）。
+   独自属性（`_ID` / `_COLOR` など）は参照・count・アライメントを検証したうえで USD には書かず、`warnCustomInstanceAttributes()` が
+   ノードと属性ごとに 1 回警告する（インスタンス数は全属性共通の count のまま。独自属性だけならその count で恒等変換のインスタンス）。
    JSON の型: トップレベル配列の要素・primitive・target・sampler・channel はオブジェクト、children / scene.nodes / samplers / channels /
    primitives / targets は配列（標準の TypeError を出さない）。
    `DEFAULT_LIMITS` はメモリとスタックを守るためだけのもの（入力 2 GiB、accessor 1 本 2^26 値、ノードの深さ 1024 など）。

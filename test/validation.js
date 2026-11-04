@@ -455,6 +455,41 @@ rejects(withJson((j) => { j.meshes[0].primitives.push({ attributes: {} }); }), /
   assert(instances(accepts(instanced({ TRANSLATION: z("VEC3", 2), ROTATION: z("VEC4", 2) }), "no SCALE")) === 2, "SCALE omitted");
   assert(instances(accepts(instanced({ ROTATION: z("VEC4", 2, 5120, { normalized: true }) }), "normalized BYTE ROTATION")) === 2, "normalized BYTE ROTATION (extension spec)");
   assert(instances(accepts(instanced({ TRANSLATION: z("VEC3", 2, 5122) }, { quantization: true }), "quantized TRANSLATION")) === 2, "SHORT TRANSLATION with KHR_mesh_quantization");
+  // The extension needs the node's mesh; attributes must not be empty.
+  rejects(instanced({ TRANSLATION: z("VEC3") }, { mutate: (j) => { delete j.nodes[0].mesh; } }), new RegExp(`${W}: the node has no mesh to instance`), "instancing without node.mesh");
+  rejects(instanced({ TRANSLATION: z("VEC3") }, { mutate: (j) => { j.nodes[0].mesh = 9; } }), /node 0: mesh 9 does not exist/, "instancing with an invalid mesh index");
+  rejects(instanced({ TRANSLATION: z("VEC3") }, { mutate: (j) => { j.nodes[0].mesh = "0"; } }), /node 0: mesh "0" does not exist/, "instancing with a string mesh index");
+  rejects(withJson((j) => { j.nodes[0].extensions = { EXT_mesh_gpu_instancing: { attributes: {} } }; }), new RegExp(`${W}: attributes must have at least one attribute`), "empty attributes");
+  // Custom attributes ("_NAME"): validated like the others, then dropped with one warning per node and attribute.
+  {
+    const run = (glb) => { const w = []; const { usda } = glbToUsda(glb, { onWarning: (x) => w.push(x) }); return { usda, w }; };
+    const custom = (w) => w.filter((x) => x.startsWith("EXT_mesh_gpu_instancing: custom instance attribute"));
+    const only = run(instanced({ _ID: z("SCALAR", 3) }));
+    assert(instances(only.usda) === 3, `_ID only: ${instances(only.usda)} instances (count comes from the attributes)`);
+    assert(custom(only.w).length === 1 && custom(only.w)[0] === 'EXT_mesh_gpu_instancing: custom instance attribute "_ID" (node 0) is not represented in USD and will be ignored', `_ID warning: ${only.w}`);
+    const both = run(instanced({ TRANSLATION: z("VEC3", 2), _ID: z("SCALAR", 2), _COLOR: z("VEC4", 2) }));
+    assert(instances(both.usda) === 2, "custom attributes do not change the instance count");
+    assert(custom(both.w).length === 2 && custom(both.w).some((x) => x.includes('"_COLOR"')) && custom(both.w).some((x) => x.includes('"_ID"')), `one warning per custom attribute: ${custom(both.w)}`);
+    // The same output as without the custom attributes (they add nothing to USD).
+    assert(both.usda === run(instanced({ TRANSLATION: z("VEC3", 2) })).usda, "custom attributes leave the USD unchanged");
+    // Two instanced nodes with the same custom attribute: one warning each.
+    const two = run(instanced({ _ID: z("SCALAR", 2) }, { mutate: (j) => { j.nodes.push({ mesh: 0, extensions: j.nodes[0].extensions }); j.scenes[0].nodes.push(1); } }));
+    assert(custom(two.w).length === 2 && custom(two.w).some((x) => x.includes("(node 1)")), `per-node warnings: ${custom(two.w)}`);
+    // Instanced node under animation (rigid skeleton path): drawn once, custom attribute still reported.
+    const animated = run(instanced({ _ID: z("SCALAR", 2) }, { mutate: (j) => {
+      j.accessors.push({ componentType: 5126, count: 1, type: "SCALAR" }, { componentType: 5126, count: 1, type: "VEC3" });
+      const n = j.accessors.length;
+      j.animations = [{ samplers: [{ input: n - 2, output: n - 1 }], channels: [{ sampler: 0, target: { node: 0, path: "translation" } }] }];
+    } }));
+    assert(animated.w.some((x) => /Node 0: EXT_mesh_gpu_instancing under an animated node is drawn once/.test(x)) && custom(animated.w).length === 1, `animated instanced node: ${animated.w}`);
+    // Without custom attributes there is no such warning.
+    assert(!custom(run(instanced({ TRANSLATION: z("VEC3", 2), ROTATION: z("VEC4", 2), SCALE: z("VEC3", 2) })).w).length, "no warning for TRS only");
+    // Custom attributes keep the reference / count / alignment checks.
+    rejects(instanced({ TRANSLATION: z("VEC3", 2), _ID: 9 }), new RegExp(`${W}: _ID accessor 9 does not exist`), "custom attribute with an invalid accessor");
+    rejects(instanced({ TRANSLATION: z("VEC3", 2), _ID: z("SCALAR", 3) }), /_ID \(accessor 3\) has 3 instances, TRANSLATION has 2/, "custom attribute count mismatch");
+    rejects(instanced({ _ID: { bufferView: 0, componentType: 5126, count: 2, type: "SCALAR", byteOffset: 2 } }), /accessor 2 byteOffset 2 is not a multiple of its component size 4/, "misaligned custom attribute");
+    rejects(instanced({ _ID: { bufferView: 1, componentType: 5123, count: 2, type: "SCALAR", byteOffset: 2 } }), /accessor 2 is an EXT_mesh_gpu_instancing attribute; its byteOffset 2 must be a multiple of 4/, "custom attribute off a 4-byte boundary");
+  }
   // The instanced mesh is also used by a plain node: one prototype, referenced by every
   // GPU instance and by the plain node (instancing on), or copies (instancing: false).
   {

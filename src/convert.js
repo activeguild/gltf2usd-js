@@ -145,7 +145,10 @@ export function gltfToStage(asset, options = {}) {
       const node = ctx.json.nodes[j];
       if (node.extensions?.KHR_lights_punctual) ctx.warn(`Node ${j}: lights under animated nodes are not supported with skeletal animation; skipped`);
       if (node.mesh === undefined || ctx.skinnedNodes.has(j)) return;
-      if (node.extensions?.EXT_mesh_gpu_instancing) ctx.warn(`Node ${j}: EXT_mesh_gpu_instancing under an animated node is drawn once`);
+      if (node.extensions?.EXT_mesh_gpu_instancing) {
+        ctx.warn(`Node ${j}: EXT_mesh_gpu_instancing under an animated node is drawn once`);
+        warnCustomInstanceAttributes(ctx, j, node);
+      }
         buildMeshPrims(ctx, skelRoot, node.mesh, names, { plan, rigidJoint: k, skelRootPath, shapes, node: j });
     });
     buildSkeleton(ctx, plan, skelRoot, skelRootPath, shapes, (nd) => restWeights(ctx, nd));
@@ -232,6 +235,7 @@ function buildNode(ctx, parent, nodeIndex, siblingNames, parentPath) {
 
   // Mesh prims and child nodes share one namespace under this Xform.
   const names = new Set();
+  if (node.extensions?.EXT_mesh_gpu_instancing) warnCustomInstanceAttributes(ctx, nodeIndex, node);
   if (node.extensions?.EXT_mesh_gpu_instancing && node.mesh !== undefined &&
       (ctx.skinnedNodes.has(nodeIndex) || meshHasTargets(ctx.json.meshes[node.mesh]))) {
     ctx.warn(`Node ${nodeIndex}: EXT_mesh_gpu_instancing on a skinned / morphed mesh is not supported; drawn once`);
@@ -376,6 +380,19 @@ function overAt(body, path) {
     prim = prim.children.find((c) => c.name === name) ?? prim.child(new Prim("", name, { specifier: "over" }));
   }
   return prim;
+}
+
+/**
+ * EXT_mesh_gpu_instancing attributes other than TRANSLATION / ROTATION / SCALE (custom
+ * "_NAME" attributes, e.g. per-instance _ID or _COLOR) have no USD counterpart here: say so
+ * once per node and attribute. They are still validated, and do not change the instance count.
+ */
+function warnCustomInstanceAttributes(ctx, nodeIndex, node) {
+  const attrs = node.extensions?.EXT_mesh_gpu_instancing?.attributes;
+  for (const name of Object.keys(attrs || {})) {
+    if (name === "TRANSLATION" || name === "ROTATION" || name === "SCALE") continue;
+    ctx.warn(`EXT_mesh_gpu_instancing: custom instance attribute "${name}" (node ${nodeIndex}) is not represented in USD and will be ignored`);
+  }
 }
 
 /**

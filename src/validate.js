@@ -341,8 +341,11 @@ export function validateDocument(json, limits) {
     if (extensions.EXT_mesh_gpu_instancing !== undefined) {
       const ext = object(extensions, "EXT_mesh_gpu_instancing", `${where} extensions`);
       const iw = `${where} EXT_mesh_gpu_instancing`;
+      // The extension instances the node's mesh, so the node must have one (its index is checked above).
+      if (node.mesh === undefined) fail(`${iw}: the node has no mesh to instance`);
       if (ext.attributes === undefined) fail(`${iw}: attributes is required`);
       const attrs = object(ext, "attributes", iw);
+      if (!Object.keys(attrs).length) fail(`${iw}: attributes must have at least one attribute`);
       let instances, first;
       for (const [name, a] of Object.entries(attrs)) {
         ref(a, accessors, `${name} accessor`, iw);

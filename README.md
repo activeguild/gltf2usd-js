@@ -100,7 +100,8 @@ GLB を選ぶかドロップすると（またはサンプルボタンで）、�
 - KHR_texture_transform（`UsdTransform2d`）
 - KHR_materials_emissive_strength / ior / clearcoat（transmission などは未対応で警告）
 - KHR_mesh_quantization、KHR_materials_unlit（黒 diffuse + 発光で近似）
-- EXT_mesh_gpu_instancing（インスタンスごとの instanceable reference に展開）
+- EXT_mesh_gpu_instancing（インスタンスごとの instanceable reference に展開。TRANSLATION / ROTATION / SCALE を使い、
+  `_ID` / `_COLOR` などの独自属性は検証したうえで USD には書かず、ノードと属性ごとに 1 回警告する）
 - KHR_materials_variants → variantSet（`default` + 各バリアント）
 - KHR_lights_punctual → UsdLux（DistantLight / SphereLight / ShapingAPI。強さは近似）
 - EXT_meshopt_compression（依存ゼロの自前デコーダ）
@@ -123,6 +124,7 @@ GLB を選ぶかドロップすると（またはサンプルボタンで）、�
 - マテリアルがあるメッシュの頂点カラー RGB（glTF は baseColor に掛けるが、`displayColor` を書くだけでマテリアルには反映しない）
 - 頂点アルファとベースカラーテクスチャのアルファの掛け合わせ（テクスチャのアルファを使い、警告）
 - KHR_meshopt_compression（EXT_ 版のみ対応。KHR_ 版は未対応の拡張として警告）、Draco のデコード
+- EXT_mesh_gpu_instancing の独自インスタンス属性（`_ID` / `_COLOR` など。警告して無視）
 - KHR_materials_transmission / volume / specular / sheen など、カメラ、2 本目以降のアニメーション、USDC 出力、ZIP64
 
 ## 設計メモ
