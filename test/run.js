@@ -122,6 +122,38 @@ assert(f.usda.includes('def Mesh "CubeC"') && f.usda.includes('def Xform "CubeC_
   assert(notGltf?.message.includes("neither a GLB nor glTF"), "garbage input error");
 }
 
+// ---- Stage 3: animation (test/animated.glb) ----
+{
+  const animGlb = readFileSync(new URL("./animated.glb", import.meta.url));
+  const w = [];
+  const a = glbToUsda(animGlb, { onWarning: (m) => w.push(m) }).usda;
+  const block = (name) => a.slice(a.indexOf(`def Xform "${name}"`), a.indexOf("xformOpOrder", a.indexOf(`def Xform "${name}"`)));
+  for (const [k, v] of [["startTimeCode", 0], ["endTimeCode", 48], ["timeCodesPerSecond", 24], ["framesPerSecond", 24]]) {
+    assert(a.includes(`    ${k} = ${v}\n`), `layer ${k} = ${v}`);
+  }
+  // LINEAR translation: keys as-is, seconds × 24.
+  assert(block("Slide").includes("double3 xformOp:translate.timeSamples = {\n                0: (0, 0, 0),\n                24: (0, 0, 1),\n                48: (0, 0, 0),\n            }"), "LINEAR translate samples");
+  assert(block("Slide").includes("quatf xformOp:orient = (1, 0, 0, 0)") && block("Slide").includes("float3 xformOp:scale = (1, 1, 1)"), "static channels keep node TRS");
+  // LINEAR rotation: quatf (w, x, y, z), 120° about Y at 1 s.
+  assert(block("Spin").includes("24: (0.5, 0, 0.8660254, 0),"), "orient samples are (w, x, y, z)");
+  assert(block("Spin").includes("double3 xformOp:translate = (1.5, 0, 0)"), "static translate of an animated node");
+  // STEP: each key held until just before the next one.
+  assert(block("Pulse").includes("11.999: (1, 1, 1),\n                12: (1.5, 1.5, 1.5),\n                35.999: (1.5, 1.5, 1.5),"), "STEP held keys");
+  // CUBICSPLINE: baked per frame; peak 1 at 1 s; Hermite value at frame 12 (0.5 s) = 0.875.
+  const bounce = block("Bounce");
+  assert(count(bounce, ": (4.5, ") === 49, `CUBICSPLINE baked at 49 frames (got ${count(bounce, ": (4.5, ")})`);
+  assert(bounce.includes("12: (4.5, 0.875, 0),") && bounce.includes("24: (4.5, 1, 0),"), "CUBICSPLINE Hermite values");
+  // Non-animated documents have no time metadata; animated nodes don't use matrices.
+  assert(!usda.includes("TimeCode"), "no time metadata without animation");
+  assert(!block("Slide").includes("xformOp:transform"), "animated node uses TRS ops");
+  // Warnings: second animation skipped, weights channel skipped.
+  assert(w.some((m) => m.includes('only animation "Main"') && m.includes("Unused")), "warns about skipped animations");
+  assert(w.some((m) => m.includes("weights")), "warns about weights channel");
+  // options.animation selects another clip.
+  const unused = glbToUsda(animGlb, { animation: "Unused" }).usda;
+  assert(unused.includes('def Xform "Spin"') && !unused.includes("xformOp:orient.timeSamples") && unused.includes("double3 xformOp:translate.timeSamples"), "options.animation by name");
+}
+
 // Cube has nothing to warn about.
 const cubeWarnings = [];
 glbToUsda(glb, { onWarning: (m) => cubeWarnings.push(m) });

@@ -17,6 +17,7 @@ export function buildUsdScene(layer, entries) {
   const materialCache = new Map();
   const geometryCache = new Map(); // Mesh prim path → BufferGeometry (shared by instances)
   const objectUrls = [];
+  const animated = []; // { prim, obj } with time-sampled xformOps
 
   const root = new THREE.Group();
   root.name = "USD";
@@ -28,7 +29,21 @@ export function buildUsdScene(layer, entries) {
     const obj = buildPrim(prim);
     if (obj) root.add(obj);
   }
-  return { object: root, warnings, dispose: () => objectUrls.forEach((u) => URL.revokeObjectURL(u)) };
+  // Timeline: objects whose xformOps have timeSamples are re-evaluated by setTime().
+  const md = layer.metadata;
+  const timeline = animated.length
+    ? {
+        start: md.startTimeCode ?? Math.min(...animated.flatMap((a) => sampleTimes(a.prim))),
+        end: md.endTimeCode ?? Math.max(...animated.flatMap((a) => sampleTimes(a.prim))),
+        timeCodesPerSecond: md.timeCodesPerSecond ?? 24,
+      }
+    : null;
+  const setTime = (timeCode) => {
+    for (const { prim, obj } of animated) applyXformOps(prim, obj, timeCode);
+  };
+  if (timeline) setTime(timeline.start);
+
+  return { object: root, warnings, timeline, setTime, dispose: () => objectUrls.forEach((u) => URL.revokeObjectURL(u)) };
 
   // ---------- Prims ----------
 
@@ -46,7 +61,8 @@ export function buildUsdScene(layer, entries) {
     }
     obj.name = prim.name;
     obj.userData.usdPath = prim.path;
-    applyXformOps(prim, obj);
+    applyXformOps(prim, obj, undefined);
+    if (hasTimeSamples(prim)) animated.push({ prim, obj });
     const vis = prim.props.get("visibility")?.value;
     if (vis === "invisible") obj.visible = false;
     for (const child of prim.children) {
@@ -82,7 +98,7 @@ export function buildUsdScene(layer, entries) {
     return { ...prim, type, props, children };
   }
 
-  function applyXformOps(prim, obj) {
+  function applyXformOps(prim, obj, time) {
     const order = prim.props.get("xformOpOrder")?.value;
     if (!order || !order.length) return;
     const m = new THREE.Matrix4();
@@ -92,11 +108,7 @@ export function buildUsdScene(layer, entries) {
       if (op === "!resetXformStack!") { warn("!resetXformStack! は未対応"); continue; }
       const prop = prim.props.get(op);
       if (!prop) { warn(`${prim.path}: xformOpOrder の ${op} が定義されていない`); continue; }
-      let v = prop.value;
-      if (v === undefined && prop.timeSamples?.length) {
-        warn("timeSamples は最初のサンプルだけを表示");
-        v = prop.timeSamples[0][1];
-      }
+      const v = valueAt(prop, time);
       const opM = xformOpMatrix(op, v);
       if (!opM) { warn(`未対応の xformOp: ${op}`); continue; }
       if (inverse) opM.invert();
@@ -383,6 +395,36 @@ export function buildUsdScene(layer, entries) {
     textureCache.set(texPrim.path, tex);
     return tex;
   }
+}
+
+// ---------- Time samples (evaluated like USD: linear, slerp for quaternions, held at the ends) ----------
+
+function hasTimeSamples(prim) {
+  return (prim.props.get("xformOpOrder")?.value ?? []).some((op) => prim.props.get(op.replace(/^!invert!/, ""))?.timeSamples?.length);
+}
+
+function sampleTimes(prim) {
+  return (prim.props.get("xformOpOrder")?.value ?? []).flatMap((op) => (prim.props.get(op)?.timeSamples ?? []).map(([t]) => t));
+}
+
+function valueAt(prop, time) {
+  const ts = prop.timeSamples;
+  if (!ts?.length) return prop.value;
+  if (time === undefined || time <= ts[0][0]) return ts[0][1];
+  if (time >= ts[ts.length - 1][0]) return ts[ts.length - 1][1];
+  let i = 0;
+  while (ts[i + 1][0] < time) i++;
+  const [t0, a] = ts[i];
+  const [t1, b] = ts[i + 1];
+  const u = (time - t0) / (t1 - t0);
+  if (/^quat/.test(prop.type)) {
+    const qa = new THREE.Quaternion(a[1], a[2], a[3], a[0]);
+    const qb = new THREE.Quaternion(b[1], b[2], b[3], b[0]);
+    qa.slerp(qb, u); // three.js slerp takes the shortest path, like GfSlerp
+    return [qa.w, qa.x, qa.y, qa.z];
+  }
+  if (Array.isArray(a)) return a.map((v, c) => v + (b[c] - v) * u);
+  return a + (b - a) * u;
 }
 
 function xformOpMatrix(op, v) {

@@ -1,6 +1,7 @@
 node_modules/
 test/cube.glb
 test/features.glb
+test/animated.glb
 *.usdz
 *.usda
 !test/fixtures/*

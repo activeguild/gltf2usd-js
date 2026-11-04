@@ -9,6 +9,7 @@
 //   /Root/Materials/<Mat>     (Material + UsdPreviewSurface + UsdUVTexture shaders)
 
 import { Layer, Prim } from "./ir.js";
+import { evaluateAnimation, TIME_CODES_PER_SECOND } from "./animation.js";
 
 const MODE_NAMES = ["POINTS", "LINES", "LINE_LOOP", "LINE_STRIP", "TRIANGLES", "TRIANGLE_STRIP", "TRIANGLE_FAN"];
 const MODE_TRIANGLES = 4;
@@ -46,6 +47,7 @@ export function gltfToStage(asset, options = {}) {
     warn: makeWarn(options.onWarning),
   };
   reportUnsupported(ctx);
+  ctx.animation = evaluateAnimation(ctx, options.animation ?? 0);
 
   const layer = new Layer({
     defaultPrim: "Root",
@@ -53,6 +55,14 @@ export function gltfToStage(asset, options = {}) {
     upAxis: "Y",
     doc: `Converted from glTF${generatorNote(ctx.json)}`,
   });
+  if (ctx.animation) {
+    Object.assign(layer.metadata, {
+      startTimeCode: ctx.animation.startTimeCode,
+      endTimeCode: ctx.animation.endTimeCode,
+      timeCodesPerSecond: TIME_CODES_PER_SECOND,
+      framesPerSecond: TIME_CODES_PER_SECOND,
+    });
+  }
   const root = layer.add(new Prim("Xform", "Root", { spaced: true }));
 
   // Scene / node hierarchy
@@ -103,7 +113,6 @@ function reportUnsupported(ctx) {
     warn(`Extension ${ext}${required ? " (required)" : ""} is not supported; its data is ignored`);
   }
   if ((json.scenes?.length ?? 0) > 1) warn(`glTF has ${json.scenes.length} scenes; only scene ${json.scene ?? 0} is converted`);
-  if (json.animations?.length) warn(`${json.animations.length} animation(s) are not supported yet and were skipped`);
   if (json.skins?.length) warn(`${json.skins.length} skin(s) are not supported yet; meshes are written in bind pose`);
   if (json.cameras?.length) warn(`${json.cameras.length} camera(s) are not supported yet and were skipped`);
   if ((json.meshes || []).some((m) => (m.primitives || []).some((p) => p.targets?.length))) {
@@ -117,10 +126,15 @@ function buildNode(ctx, parent, nodeIndex, siblingNames) {
   const node = ctx.json.nodes[nodeIndex];
   const name = uniqueName(sanitize(node.name, `Node_${nodeIndex}`), siblingNames);
   const xform = parent.child(new Prim("Xform", name));
-  const m = nodeMatrix(node);
-  if (m) {
-    xform.attr("matrix4d", "xformOp:transform", m);
-    xform.attr("token[]", "xformOpOrder", ["xformOp:transform"], { uniform: true });
+  const channels = ctx.animation?.nodes.get(nodeIndex);
+  if (channels) {
+    writeAnimatedTRS(xform, node, channels);
+  } else {
+    const m = nodeMatrix(node);
+    if (m) {
+      xform.attr("matrix4d", "xformOp:transform", m);
+      xform.attr("token[]", "xformOpOrder", ["xformOp:transform"], { uniform: true });
+    }
   }
 
   // Mesh prims and child nodes share one namespace under this Xform.
@@ -175,6 +189,25 @@ function planPrototypes(ctx, rootNodes, enabled) {
     prototypes.set(meshIndex, uniqueName(sanitize(mesh.name, `Mesh_${meshIndex}`), used));
   });
   return prototypes;
+}
+
+/**
+ * Animated nodes use separate translate / orient / scale ops (USD composes
+ * xformOpOrder left to right as outer to inner: T · R · S, like glTF).
+ * Channels without animation keep the node's static value.
+ */
+function writeAnimatedTRS(xform, node, channels) {
+  const wxyz = ([x, y, z, w]) => [w, x, y, z]; // glTF quaternion → USD quatf
+  const op = (typeName, opName, path, staticValue, convert = (v) => v) => {
+    const samples = channels[path];
+    xform.attr(typeName, opName, samples ? undefined : convert(staticValue), {
+      timeSamples: samples?.map(([t, v]) => [t, convert(v)]),
+    });
+  };
+  op("double3", "xformOp:translate", "translation", node.translation ?? [0, 0, 0]);
+  op("quatf", "xformOp:orient", "rotation", node.rotation ?? [0, 0, 0, 1], wxyz);
+  op("float3", "xformOp:scale", "scale", node.scale ?? [1, 1, 1]);
+  xform.attr("token[]", "xformOpOrder", ["xformOp:translate", "xformOp:orient", "xformOp:scale"], { uniform: true });
 }
 
 function nodeMatrix(node) {

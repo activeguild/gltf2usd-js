@@ -133,6 +133,79 @@ export function buildCubeGltf() {
   };
 }
 
+/**
+ * Stage 3: four instanced cubes, each animated with a different sampler:
+ *  - "Slide":  translation, LINEAR
+ *  - "Spin":   rotation about Y, LINEAR (slerp)
+ *  - "Pulse":  scale, STEP
+ *  - "Bounce": translation, CUBICSPLINE
+ * plus a "weights" channel (unsupported → warning) and a second animation
+ * ("Unused", skipped with a warning).
+ * @returns {Uint8Array} GLB bytes
+ */
+export function buildAnimatedGlb() {
+  const f32 = (a) => new Uint8Array(new Float32Array(a).buffer);
+  const ry = (deg) => [0, Math.sin((deg * Math.PI) / 360), 0, Math.cos((deg * Math.PI) / 360)];
+  const tracks = [
+    // [times, values, type]
+    [[0, 1, 2], [0, 0, 0, 0, 0, 1, 0, 0, 0], "VEC3"], // Slide: z 0 → 1 → 0
+    [[0, 1, 2], [...ry(0), ...ry(120), ...ry(240)], "VEC4"], // Spin: 0° → 120° → 240° about Y
+    [[0, 0.5, 1.5, 2], [1, 1, 1, 1.5, 1.5, 1.5, 0.5, 0.5, 0.5, 1, 1, 1], "VEC3"], // Pulse: held scales
+    // CUBICSPLINE: (in-tangent, value, out-tangent) per key
+    [[0, 1, 2], [
+      0, 0, 0, 4.5, 0, 0, 0, 3, 0,
+      0, 0, 0, 4.5, 1, 0, 0, 0, 0,
+      0, -3, 0, 4.5, 0, 0, 0, 0, 0,
+    ], "VEC3"], // Bounce: y 0 → 1 → 0 at x = 4.5
+    [[0, 2], [0, 1], "SCALAR"], // weights (unsupported)
+  ];
+  const extra = [quadrantPng()]; // bufferView 5
+  const accessors = [...CUBE_ACCESSORS];
+  for (const [times, values, type] of tracks) {
+    extra.push(f32(times), f32(values));
+    const v = 5 + extra.length - 2; // bufferView index of `times`
+    accessors.push(
+      { bufferView: v, componentType: 5126, count: times.length, type: "SCALAR", min: [Math.min(...times)], max: [Math.max(...times)] },
+      { bufferView: v + 1, componentType: 5126, count: values.length / { SCALAR: 1, VEC3: 3, VEC4: 4 }[type], type },
+    );
+  }
+  const { bin, views } = cubeBin(extra);
+  const node = (name, x) => ({ name, mesh: 0, translation: [x, 0, 0] });
+  return packGlb({
+    asset: { version: "2.0", generator: "test-animated" },
+    scene: 0,
+    scenes: [{ nodes: [0, 1, 2, 3] }],
+    nodes: [node("Slide", 0), node("Spin", 1.5), node("Pulse", 3), node("Bounce", 4.5)],
+    meshes: [{ name: "Cube", primitives: [{ attributes: { POSITION: 0, NORMAL: 1, TEXCOORD_0: 2 }, indices: 3, material: 0 }] }],
+    accessors,
+    bufferViews: views,
+    buffers: [{ byteLength: bin.length }],
+    images: [{ bufferView: 5, mimeType: "image/png", name: "quadrants" }],
+    textures: [{ source: 0 }],
+    materials: [{ name: "Quadrants", pbrMetallicRoughness: { baseColorTexture: { index: 0 }, metallicFactor: 0 } }],
+    animations: [
+      {
+        name: "Main",
+        samplers: [
+          { input: 4, output: 5 },
+          { input: 6, output: 7, interpolation: "LINEAR" },
+          { input: 8, output: 9, interpolation: "STEP" },
+          { input: 10, output: 11, interpolation: "CUBICSPLINE" },
+          { input: 12, output: 13 },
+        ],
+        channels: [
+          { sampler: 0, target: { node: 0, path: "translation" } },
+          { sampler: 1, target: { node: 1, path: "rotation" } },
+          { sampler: 2, target: { node: 2, path: "scale" } },
+          { sampler: 3, target: { node: 3, path: "translation" } },
+          { sampler: 4, target: { node: 0, path: "weights" } },
+        ],
+      },
+      { name: "Unused", samplers: [{ input: 4, output: 5 }], channels: [{ sampler: 0, target: { node: 1, path: "translation" } }] },
+    ],
+  }, bin);
+}
+
 const CUBE_ACCESSORS = [
   { bufferView: 0, componentType: 5126, count: 24, type: "VEC3", min: [-0.5, -0.5, -0.5], max: [0.5, 0.5, 0.5] },
   { bufferView: 1, componentType: 5126, count: 24, type: "VEC3" },

@@ -4,7 +4,7 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 
 import { glbToUsdz, parseGltf, resolveResource } from "../src/index.js";
-import { buildCubeGlb, buildCubeGltf, buildFeatureGlb } from "../test/cube-glb.js";
+import { buildAnimatedGlb, buildCubeGlb, buildCubeGltf, buildFeatureGlb } from "../test/cube-glb.js";
 import { readUsdz } from "./usdz-reader.js";
 import { parseUsda, traverse, primReferences } from "./usda-parser.js";
 import { runChecks } from "./checks.js";
@@ -88,7 +88,66 @@ function frameCamera() {
   }
 }
 
+// ---------- Animation playback (both views share one clock, in seconds) ----------
+
+let anim = null; // { mixer, start, end, tcps, t, playing }
+let lastGltf = null;
+let lastFrame = performance.now();
+
+function setupAnimation() {
+  anim = null;
+  $("anim").hidden = true;
+  const timeline = usdPreview?.timeline;
+  if (!timeline) return;
+  const tcps = timeline.timeCodesPerSecond;
+  let mixer = null;
+  const clip = lastGltf?.animations?.[0]; // the converter writes animation 0 by default
+  if (clip && views[0].content) {
+    mixer = new THREE.AnimationMixer(views[0].content);
+    const action = mixer.clipAction(clip);
+    action.setLoop(THREE.LoopOnce); // we wrap time ourselves so both views loop together
+    action.clampWhenFinished = true;
+    action.play();
+  }
+  anim = { mixer, start: timeline.start / tcps, end: timeline.end / tcps, tcps, t: timeline.start / tcps, playing: true };
+  const slider = $("time");
+  slider.min = String(anim.start);
+  slider.max = String(anim.end);
+  $("play").textContent = "一時停止";
+  $("anim").hidden = false;
+  applyAnimationTime();
+}
+
+function applyAnimationTime() {
+  if (!anim) return;
+  anim.mixer?.setTime(anim.t);
+  usdPreview?.setTime(anim.t * anim.tcps);
+  $("time").value = String(anim.t);
+  $("time-label").textContent = `${anim.t.toFixed(2)} / ${anim.end.toFixed(2)} s`;
+}
+
+$("play").addEventListener("click", () => {
+  if (!anim) return;
+  anim.playing = !anim.playing;
+  $("play").textContent = anim.playing ? "一時停止" : "再生";
+});
+$("time").addEventListener("input", (e) => {
+  if (!anim) return;
+  anim.playing = false;
+  $("play").textContent = "再生";
+  anim.t = Number(e.target.value);
+  applyAnimationTime();
+});
+
 function loop() {
+  const now = performance.now();
+  if (anim?.playing) {
+    const span = anim.end - anim.start;
+    anim.t += (now - lastFrame) / 1000;
+    if (anim.t > anim.end) anim.t = span > 0 ? anim.start + ((anim.t - anim.start) % span) : anim.start;
+    applyAnimationTime();
+  }
+  lastFrame = now;
   for (const v of views) {
     const { canvas, renderer } = v;
     const w = canvas.clientWidth, h = canvas.clientHeight;
@@ -114,6 +173,7 @@ $("file").addEventListener("change", (e) => {
 });
 $("sample").addEventListener("click", () => run(buildCubeGlb(), "sample-cube.glb"));
 $("sample-features").addEventListener("click", () => run(buildFeatureGlb(), "sample-features.glb"));
+$("sample-anim").addEventListener("click", () => run(buildAnimatedGlb(), "sample-animated.glb"));
 $("sample-gltf").addEventListener("click", () => {
   const { gltf, resources } = buildCubeGltf();
   run(new TextEncoder().encode(gltf), "cube.gltf", new Map(Object.entries(resources)));
@@ -160,6 +220,9 @@ async function run(glb, name, resources = new Map()) {
   urls = [];
   usdPreview?.dispose();
   usdPreview = null;
+  anim = null;
+  lastGltf = null;
+  $("anim").hidden = true;
 
   // 1) Convert
   const converterWarnings = [];
@@ -214,6 +277,7 @@ async function run(glb, name, resources = new Map()) {
     overlay("usd", "出力を解析できませんでした", true);
   }
   frameCamera();
+  setupAnimation();
 
   // 5) Downloads
   const base = name.replace(/\.(glb|gltf)$/i, "") || "model";
@@ -256,6 +320,7 @@ function showGltf(glb, resources) {
       return blobUrls.get(bytes);
     });
     new GLTFLoader(manager).parse(buf, "", (gltf) => {
+      lastGltf = gltf;
       fixTextureTransforms(gltf.scene);
       setContent(views[0], gltf.scene);
       overlay("gltf", null);

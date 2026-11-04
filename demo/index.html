@@ -31,6 +31,7 @@
       <button class="btn" id="sample" type="button">サンプル: テクスチャ付きキューブ</button>
       <button class="btn" id="sample-features" type="button">サンプル: 段階 2 の機能</button>
       <button class="btn" id="sample-gltf" type="button">サンプル: .gltf + 外部ファイル</button>
+      <button class="btn" id="sample-anim" type="button">サンプル: アニメーション</button>
       <span class="hint">またはこのページにドロップ（.gltf は .bin や画像も一緒に選ぶ / ドロップする）</span>
       <span class="filename" id="filename"></span>
     </section>
@@ -56,6 +57,11 @@
       <a class="btn primary" id="dl-usdz" download>USDZ をダウンロード</a>
       <a class="btn" id="dl-usda" download>USDA をダウンロード</a>
       <a class="btn" id="ar" rel="ar" hidden><img alt="" width="1" height="1" src="data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=">AR Quick Look で開く</a>
+      <span class="anim" id="anim" hidden>
+        <button class="btn" id="play" type="button">一時停止</button>
+        <input type="range" id="time" min="0" max="1" step="0.001" value="0" aria-label="時刻">
+        <span class="time-label" id="time-label"></span>
+      </span>
       <label class="check"><input type="checkbox" id="wire"> ワイヤーフレーム</label>
       <button class="btn" id="reset-cam" type="button">視点をリセット</button>
     </section>

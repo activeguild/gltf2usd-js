@@ -26,6 +26,8 @@ export function gltfToUsda(asset, options = {}) {
  * options.texturePrefix: folder for packaged textures (default "textures/").
  * options.instancing: meshes used by several nodes become instanceable references
  *   to a prototype under /Root/Meshes (default true; false duplicates them).
+ * options.animation: index or name of the glTF animation to convert (default 0).
+ *   USD has one timeline, so only one animation is written.
  */
 export function glbToUsda(input, options = {}) {
   const asset = new GltfAsset(parseInput(input), { resources: options.resources });
