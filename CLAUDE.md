@@ -204,8 +204,9 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
    gltf-transform の meshopt / 量子化出力で誤検出がないことを確認済み。）
    アニメーションのキーが壊れたチャンネル（時刻が減る、NaN / Infinity、個数が合わない）は警告してスキップ。同時刻のキーは最後を残す。
    JOINTS の範囲外（ウェイト > 0）・負 / NaN のウェイトはエラー、ウェイトの合計が 1 でない頂点は警告してそのまま書く。
-   Mesh: 頂点属性（NORMAL / TANGENT / TEXCOORD_n / COLOR_n / JOINTS_n / WEIGHTS_n）と morph target の要素数は POSITION と同じ
-   （`_NAME` の独自属性は対象外）、インデックスは SCALAR・5121/5123/5125・normalized なし、TRIANGLES は 3 の倍数（インデックスなしなら頂点数）、
+   Mesh: primitive の全属性（標準も `_NAME` の独自属性も例外なし）と morph target の要素数は POSITION と同じ（§ 3.7.2.1）。
+   TEXCOORD_n / COLOR_n / JOINTS_n / WEIGHTS_n の n は 0 か先頭ゼロなしの 1〜999999999（9 桁まで）で、0 から欠けなく連続（`setsOf()`）。
+   インデックスは SCALAR・5121/5123/5125・normalized なし、TRIANGLES は 3 の倍数（インデックスなしなら頂点数）、
    mode は 0..6、インデックスの値は POSITION の数未満（値はデコード後でないと分からないので `buildTriangleIndices()` で検査）。
    属性の type / componentType は glTF 2.0 § 3.7.2.1 どおり（POSITION / NORMAL VEC3、TANGENT VEC4、TEXCOORD_n VEC2、COLOR_n VEC3/VEC4、
    JOINTS_n / WEIGHTS_n VEC4。COLOR / WEIGHTS の整数は normalized の UNSIGNED_BYTE / SHORT のみ、JOINTS は normalized でない

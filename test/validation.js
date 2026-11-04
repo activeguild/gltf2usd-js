@@ -205,8 +205,32 @@ assert(DEFAULT_LIMITS.maxNodeDepth === 1024 && Object.isFrozen(DEFAULT_LIMITS), 
     j.accessors.push({ componentType: 5121, count: 3, type: "VEC4" }, { componentType: 5126, count: 6, type: "VEC4" });
     Object.assign(j.meshes[0].primitives[0].attributes, { JOINTS_0: 2, WEIGHTS_0: 3 });
   }), /WEIGHTS_0 \(accessor 3\) has 6 elements/, "POSITION / WEIGHTS_0 count mismatch");
-  // Custom attributes ("_NAME") are not vertex-count checked.
-  assert(accepts(attr("_TEMPERATURE", { componentType: 5126, count: 1, type: "SCALAR" }), "custom attribute").includes("def Mesh"), "custom attribute with another count is accepted");
+  // Custom attributes ("_NAME") have POSITION's count too (§ 3.7.2.1: all attribute accessors of a primitive).
+  assert(accepts(attr("_TEMPERATURE", { componentType: 5126, count: 3, type: "SCALAR" }), "custom attribute, same count").includes("def Mesh"), "_TEMPERATURE count 3 accepted");
+  rejects(attr("_TEMPERATURE", { componentType: 5126, count: 1, type: "SCALAR" }), /mesh 0 primitive 0: _TEMPERATURE \(accessor 2\) has 1 elements, POSITION \(accessor 0\) has 3/, "_TEMPERATURE count 1");
+  rejects(attr("_TEMPERATURE", { componentType: 5126, count: 4, type: "SCALAR" }), /_TEMPERATURE \(accessor 2\) has 4 elements, POSITION \(accessor 0\) has 3/, "_TEMPERATURE count 4");
+
+  // TEXCOORD_n / COLOR_n: well-formed indices, numbered from 0 without gaps.
+  const uv = () => ({ componentType: 5126, count: 3, type: "VEC2" });
+  const rgba = () => ({ componentType: 5126, count: 3, type: "VEC4" });
+  const sets = (attrs) => withJson((j) => {
+    for (const [name, acc] of Object.entries(attrs)) { j.accessors.push(acc); j.meshes[0].primitives[0].attributes[name] = j.accessors.length - 1; }
+  });
+  for (const [sem, make] of [["TEXCOORD", uv], ["COLOR", rgba]]) {
+    assert(accepts(sets({ [`${sem}_0`]: make() }), `${sem}_0`).includes("def Mesh"), `${sem}_0 accepted`);
+    assert(accepts(sets({ [`${sem}_0`]: make(), [`${sem}_1`]: make() }), `${sem}_0 + ${sem}_1`).includes("def Mesh"), `${sem}_0 + ${sem}_1 accepted`);
+    rejects(sets({ [`${sem}_01`]: make() }), new RegExp(`mesh 0 primitive 0: attribute "${sem}_01" has an invalid set index`), `${sem}_01`);
+    rejects(sets({ [`${sem}_0`]: make(), [`${sem}_00`]: make() }), new RegExp(`attribute "${sem}_00" has an invalid set index`), `${sem}_00`);
+    rejects(sets({ [`${sem}_2`]: make() }), new RegExp(`mesh 0 primitive 0: ${sem}_0 is missing \\(sets must be numbered from 0 without gaps; found _2\\)`), `${sem}_2 only`);
+    rejects(sets({ [`${sem}_0`]: make(), [`${sem}_2`]: make() }), new RegExp(`${sem}_1 is missing \\(sets must be numbered from 0 without gaps; found _0, _2\\)`), `${sem}_0 + ${sem}_2`);
+    rejects(sets({ [`${sem}_1000000000`]: make() }), new RegExp(`attribute "${sem}_1000000000" has an invalid set index`), `${sem}_1000000000`);
+    rejects(sets({ [`${sem}_`]: make() }), new RegExp(`attribute "${sem}_" has an invalid set index`), `${sem}_ (empty index)`);
+    rejects(sets({ [`${sem}_-1`]: make() }), new RegExp(`attribute "${sem}_-1" has an invalid set index`), `${sem}_-1`);
+  }
+  // The largest allowed index is 9 digits (here it fails only for the gap, not the name).
+  rejects(sets({ TEXCOORD_999999999: uv() }), /TEXCOORD_0 is missing \(sets must be numbered from 0 without gaps; found _999999999\)/, "TEXCOORD_999999999 is a valid name");
+  // JOINTS_n / WEIGHTS_n use the same index rules and keep the pairing rule.
+  rejects(sets({ JOINTS_01: { componentType: 5121, count: 3, type: "VEC4" }, WEIGHTS_01: rgba() }), /attribute "JOINTS_01" has an invalid set index/, "JOINTS_01");
   rejects(withAccessor({ componentType: 5126, count: 2, type: "VEC3" }, (j, a) => { j.meshes[0].primitives[0].targets = [{ POSITION: a }]; }),
     /mesh 0 primitive 0 target 0: POSITION \(accessor 2\) has 2 elements, POSITION has 3/, "morph target count mismatch");
   // Index accessors.

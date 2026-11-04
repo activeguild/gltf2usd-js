@@ -74,8 +74,9 @@ export function elementLayout(componentType, type) {
 const isIndex = (v) => Number.isInteger(v) && v >= 0;
 const isObject = (v) => !!v && typeof v === "object" && !Array.isArray(v);
 
-// Vertex attributes whose count must equal POSITION's (custom "_NAME" attributes are not checked).
-const VERTEX_ATTRIBUTE = /^(POSITION|NORMAL|TANGENT|TEXCOORD_\d+|COLOR_\d+|JOINTS_\d+|WEIGHTS_\d+)$/;
+// Set index of TEXCOORD_n / COLOR_n / JOINTS_n / WEIGHTS_n: 0, or 1..999999999 without
+// leading zeros (at most 9 digits).
+const SET_INDEX = /^(0|[1-9]\d{0,8})$/;
 const INDEX_TYPES = new Set([5121, 5123, 5125]);
 
 // Accessor type and component types per attribute semantic (glTF 2.0 § 3.7.2.1).
@@ -287,27 +288,41 @@ export function validateDocument(json, limits) {
       const where = `mesh ${mi} primitive ${pi}`;
       if (!isObject(p)) fail(`${where} must be an object`);
       const attributes = object(p, "attributes", where);
+      // Indexed semantics (TEXCOORD_n, COLOR_n, JOINTS_n, WEIGHTS_n): a well-formed index, and
+      // sets numbered 0, 1, 2, ... without gaps. JOINTS_n / WEIGHTS_n also come in pairs.
+      const setsOf = (semantic) => {
+        const out = [];
+        for (const name of Object.keys(attributes)) {
+          if (!name.startsWith(`${semantic}_`)) continue;
+          const index = name.slice(semantic.length + 1);
+          if (!SET_INDEX.test(index)) fail(`${where}: attribute "${name}" has an invalid set index (0, or 1..999999999 without leading zeros)`);
+          out.push(Number(index));
+        }
+        return out.sort((a, b) => a - b);
+      };
+      const requireContiguous = (sets, missing) => sets.forEach((n, k) => {
+        if (n !== k) fail(`${where}: ${missing(k)} (sets must be numbered from 0 without gaps; found ${sets.map((x) => `_${x}`).join(", ")})`);
+      });
+      requireContiguous(setsOf("TEXCOORD"), (k) => `TEXCOORD_${k} is missing`);
+      requireContiguous(setsOf("COLOR"), (k) => `COLOR_${k} is missing`);
+      const joints = setsOf("JOINTS"), weights = setsOf("WEIGHTS");
+      for (const n of joints) if (!weights.includes(n)) fail(`${where}: JOINTS_${n} has no matching WEIGHTS_${n}`);
+      for (const n of weights) if (!joints.includes(n)) fail(`${where}: WEIGHTS_${n} has no matching JOINTS_${n}`);
+      requireContiguous(joints, (k) => `JOINTS_${k} / WEIGHTS_${k} are missing`);
       for (const [name, a] of Object.entries(attributes)) {
         ref(a, accessors, `${name} accessor`, where);
         checkAttribute(ATTRIBUTE_RULES, name, accessors[a], `${where}: ${name} (accessor ${a})`, quantization, fail, "a glTF attribute semantic");
       }
       // POSITION is what the converter draws; without it there is no geometry to convert.
       if (attributes.POSITION === undefined) fail(`${where}: has no POSITION attribute`);
-      // JOINTS_n / WEIGHTS_n come in pairs, numbered 0, 1, 2, ... without gaps.
-      const setsOf = (prefix) => Object.keys(attributes).filter((k) => k.startsWith(prefix) && /^\d+$/.test(k.slice(prefix.length))).map((k) => Number(k.slice(prefix.length)));
-      const joints = setsOf("JOINTS_"), weights = setsOf("WEIGHTS_");
-      for (const n of joints) if (!weights.includes(n)) fail(`${where}: JOINTS_${n} has no matching WEIGHTS_${n}`);
-      for (const n of weights) if (!joints.includes(n)) fail(`${where}: WEIGHTS_${n} has no matching JOINTS_${n}`);
-      const sets = [...joints].sort((a, b) => a - b);
-      sets.forEach((n, k) => { if (n !== k) fail(`${where}: JOINTS_${k} / WEIGHTS_${k} are missing (sets must be numbered from 0 without gaps; found ${sets.map((x) => `_${x}`).join(", ")})`); });
       const mode = p.mode ?? MODE_TRIANGLES;
       if (!(Number.isInteger(mode) && mode >= 0 && mode <= 6)) fail(`${where}: mode ${JSON.stringify(p.mode)} is not a glTF primitive mode (0..6)`);
-      // All vertex attributes have one element per vertex (POSITION's count).
+      // Every attribute, standard or custom, has one element per vertex (POSITION's count; § 3.7.2.1).
       const position = attributes.POSITION !== undefined ? accessors[attributes.POSITION] : null;
       const vertexCount = position?.count;
       if (position) {
         for (const [name, a] of Object.entries(attributes)) {
-          if (VERTEX_ATTRIBUTE.test(name) && accessors[a].count !== vertexCount) {
+          if (accessors[a].count !== vertexCount) {
             fail(`${where}: ${name} (accessor ${a}) has ${accessors[a].count} elements, POSITION (accessor ${attributes.POSITION}) has ${vertexCount}`);
           }
         }
