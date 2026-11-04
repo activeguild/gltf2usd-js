@@ -4,7 +4,12 @@
   "description": "Dependency-free GLB → USDA/USDZ converter for browser and Node",
   "type": "module",
   "main": "src/index.js",
-  "bin": { "glb2usd": "./cli.js" },
-  "scripts": { "test": "node test/make-glb.js && node test/run.js" },
+  "bin": {
+    "glb2usd": "./cli.js"
+  },
+  "scripts": {
+    "test": "node test/make-glb.js && node test/run.js",
+    "demo": "node demo/server.js"
+  },
   "license": "MIT"
 }

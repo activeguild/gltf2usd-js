@@ -22,7 +22,26 @@ const { usda, files } = glbToUsda(buf);          // files = テクスチャ等 {
 
 CLI: `node cli.js in.glb out.usdz` (`.usda` を指定すればテキスト出力)
 
-テスト: `node test/make-glb.js && npm test`
+テスト: `npm test`（テスト用 GLB の生成も含む）
+
+## Web デモ（テストアプリ）
+
+```bash
+npm run demo        # http://localhost:8080/demo/ を開く
+```
+
+GLB を選ぶかドロップすると（またはサンプルボタンで）、ブラウザ内で USDZ に変換し、次を表示します。
+
+- 元の glTF（three.js GLTFLoader）と変換結果の USD を並べた 3D 表示（カメラは連動）
+- 出力の構造チェック: zip が無圧縮・64 バイト境界・CRC 一致、defaultPrim / upAxis、Mesh のトポロジと primvar の要素数、
+  `material:binding` と `MaterialBindingAPI`、シェーダ接続とテクスチャ参照、`inputs:varname` の型
+- USDA 本文、Prim ツリー、USDZ のエントリ一覧、入力 glTF の概要（未対応の拡張・アニメーションの有無）
+- USDZ / USDA のダウンロード、iPhone / iPad では AR Quick Look
+
+右側の USD 表示は `demo/usda-parser.js` で USDA を読み直し、`demo/usd-preview.js` で three.js に組み立てる簡易プレビューです。
+`src/usda.js` とは独立に書いてあるので、出力を実際に読み戻した結果になります（OpenUSD のレンダラではありません）。
+デモだけ three.js を CDN（jsDelivr）から読み込みます。`src/` は引き続き依存ゼロです。
+静的ファイルだけで動くので、リポジトリのルートをそのまま GitHub Pages などで公開すれば `/demo/` で使えます。
 
 ## 構成
 
@@ -32,6 +51,7 @@ CLI: `node cli.js in.glb out.usdz` (`.usda` を指定すればテキスト出力
 | `src/usda.js` | glTF → USDA。ノード階層 (Xform)、メッシュ (Mesh)、マテリアル (UsdPreviewSurface) |
 | `src/usdz.js` | USDZ パッケージャ（stored-only zip、64 バイトアライン、CRC32 自前実装） |
 | `src/index.js`| 公開 API |
+| `demo/`       | ブラウザ用テストアプリ（`npm run demo`） |
 
 ## 現在対応しているもの（段階 1）
 

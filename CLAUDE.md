@@ -20,9 +20,23 @@ OpenUSD 26.11 の全 30 バリデータに通して error 0 を確認済み。
 | `src/usdz.js` | `packUsdz(entries)` → `Uint8Array` | stored-only zip、64 バイトアライン、CRC32 自前 |
 | `src/index.js`| `glbToUsda()`, `glbToUsdz()` | 公開 API |
 | `cli.js`      | `node cli.js in.glb out.usdz\|out.usda` | |
-| `test/make-glb.js` | テスト用 GLB 生成 | |
+| `test/cube-glb.js` | テスト用 GLB をメモリ上で生成（Node / ブラウザ共用） | |
+| `test/make-glb.js` | `test/cube.glb` を書き出す | |
 | `test/run.js` | JS 側の単体テスト（prim 名、zip アライン検証） | `npm test` |
 | `test/validate.py` | OpenUSD で開いてバリデータ実行 | `pip install usd-core` が必要 |
+| `demo/` | Web テストアプリ（`npm run demo` → `http://localhost:8080/demo/`） | 下記 |
+
+### Web デモ（`demo/`）
+- `index.html` / `app.js` / `style.css`: GLB を変換し、glTF（GLTFLoader）と USD を並べて表示、チェック結果・USDA・Prim ツリー・zip エントリを表示
+- `usda-parser.js`: USDA の汎用パーサ（`src/usda.js` とは独立に実装。出力を読み戻すため）
+- `usd-preview.js`: パース結果から three.js シーンを組み立てる（xformOp、Mesh の各 interpolation、UsdPreviewSurface + UsdUVTexture）。
+  表現できないものは「プレビューで表現できなかったもの」に出る
+- `checks.js`: 構造チェック（zip アライン / 圧縮 / CRC、Mesh トポロジ、primvar 要素数、binding、シェーダ接続、テクスチャ参照）
+- `usdz-reader.js`: zip の central directory を読む
+- `server.js`: 依存ゼロの静的サーバ
+- three.js（0.170.0）は import map で jsDelivr から読む。デモにだけ許される依存で、`src/` には入れない
+- **新しい USD 機能を出力したら、`usd-preview.js` / `checks.js` もそれを読めるように更新する**（例: 段階 3 の timeSamples、
+  段階 2 の `UsdTransform2d` や `primvars:st1` は一部対応済み・警告表示）
 
 ### 対応済み
 - GLB ヘッダ / JSON / BIN チャンク、`data:` URI のバッファと画像
@@ -71,6 +85,7 @@ npm test                                   # GLB 生成 + JS テスト
 node cli.js test/cube.glb /tmp/cube.usdz
 pip install usd-core --break-system-packages   # 初回のみ
 python3 test/validate.py /tmp/cube.usdz    # "0 validation error(s)" を確認
+npm run demo                               # 見た目の確認: サンプルと fixtures の GLB を左右で比較
 ```
 
 実物の GLB で確認したい場合は Khronos の glTF-Sample-Assets（Apache 2.0 / CC 系）から
@@ -121,5 +136,5 @@ python3 test/validate.py /tmp/cube.usdz    # "0 validation error(s)" を確認
 
 - ESM、セミコロンあり、ダブルクォート、2 スペースインデント
 - `src/` に外部依存を追加しない。どうしても必要なら理由を README に書く
-- 新機能は `test/make-glb.js` にケースを足すか `test/fixtures/` のサンプルで検証し、`validate.py` で error 0 を保つ
+- 新機能は `test/cube-glb.js` にケースを足すか `test/fixtures/` のサンプルで検証し、`validate.py` で error 0 を保つ
 - 変換で捨てた情報（未対応拡張など）は `console.warn` ではなく `options.onWarning?.(msg)` 経由で通知する（未実装、段階 2 で追加）
