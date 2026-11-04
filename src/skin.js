@@ -175,9 +175,10 @@ export function planRigidAnimation(ctx, sceneNodes, exclude) {
   return { index: -1, name, joints, tokens, remap: null, bind, prefix, users, rigid: true, roots: new Set(roots) };
 }
 
-/** Rigid binding of a mesh to joint `k`: constant jointIndices / weights, geomBind = rest world. */
-export function rigidPrimvars(plan, k) {
-  return { indices: [k], weights: [1], elementSize: 1, constant: true, geomBind: plan.bind[k] };
+/** Rigid binding of a mesh to joint `k`: every point on joint k with weight 1, geomBind = rest world. */
+export function rigidPrimvars(plan, k, vertexCount) {
+  // Written per point (interpolation "vertex"), as in the layout Quick Look played.
+  return { indices: new Array(vertexCount).fill(k), weights: new Array(vertexCount).fill(1), elementSize: 1, geomBind: plan.bind[k] };
 }
 
 /** Joint-local (relative to parent joint) T / R / S at a time code (undefined = rest pose). */
@@ -205,6 +206,7 @@ export const NO_JOINTS = Object.freeze({ joints: [], tokens: [], bind: [], prefi
  * @param {(node: number) => number[]} restWeights
  */
 export function buildSkeleton(ctx, plan, skelRoot, skelRootPath, shapes = [], restWeights = () => []) {
+  ctx.hasSkeleton = true;
   const n = plan.joints.length;
   const rest = [];
   for (let k = 0; k < n; k++) {
@@ -227,8 +229,9 @@ export function buildSkeleton(ctx, plan, skelRoot, skelRootPath, shapes = [], re
     skeleton.attr("matrix4d[]", "restTransforms", rest.flat(), { uniform: true });
   }
   if (!needsAnim) return;
-  skeleton.rel("skel:animationSource", `${skelRootPath}/Animation`);
-  const anim = skelRoot.child(new Prim("SkelAnimation", "Animation"));
+  // The SkelAnimation is a child of its Skeleton, as in Apple's samples.
+  skeleton.rel("skel:animationSource", `${skelRootPath}/Skeleton/Animation`);
+  const anim = skeleton.child(new Prim("SkelAnimation", "Animation"));
 
   if (jointsAnimated) {
     // Every joint is sampled at the union of all joint key times.

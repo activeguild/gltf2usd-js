@@ -173,12 +173,13 @@ assert(f.usda.includes('def Mesh "CubeC"') && f.usda.includes('def Xform "CubeC_
 {
   const animGlb = readFileSync(new URL("./animated.glb", import.meta.url));
   const s = glbToUsda(animGlb).usda;
-  const skelRoot = s.slice(s.indexOf('def SkelRoot "Animated"'), s.indexOf('def Scope "Materials"'));
+  const skelRoot = s.slice(s.indexOf('def Xform "Animated"'), s.indexOf('def Scope "Materials"'));
   assert(s.includes('kind = "component"'), "root prim is a component model");
-  assert(skelRoot && !s.slice(s.indexOf('def Xform "Scene"'), s.indexOf('def SkelRoot "Animated"')).includes("Slide"), "animated nodes leave /Root/Scene");
+  assert(skelRoot && !s.slice(s.indexOf('def Xform "Scene"'), s.indexOf('def Xform "Animated"')).includes("Slide"), "animated nodes leave /Root/Scene");
   assert(skelRoot.includes('uniform token[] joints = ["Slide", "Spin", "Pulse", "Bounce"]'), "one joint per animated node");
-  assert(skelRoot.includes("rel skel:animationSource = </Root/Animated/Animation>") && skelRoot.includes("quatf[] rotations.timeSamples"), "SkelAnimation drives the joints");
-  assert(count(skelRoot, 'interpolation = "constant"') === 8 && skelRoot.includes("primvars:skel:jointIndices = [3]"), "meshes bound rigidly (constant joint index)");
+  assert(skelRoot.includes("rel skel:animationSource = </Root/Animated/Skeleton/Animation>") && skelRoot.includes("quatf[] rotations.timeSamples"), "SkelAnimation drives the joints");
+  assert(skelRoot.includes("primvars:skel:jointIndices = [3, 3, 3,") && skelRoot.includes("primvars:skel:jointWeights = [1, 1, 1,"), "meshes bound rigidly (every point on its node's joint)");
+  assert(s.includes('def SkelRoot "Root"') && count(s, "def SkelRoot") === 1, "/Root is the single SkelRoot");
   assert(skelRoot.includes("matrix4d primvars:skel:geomBindTransform = ( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (4.5, 0, 0, 1) )"), "geomBind = node rest world");
   assert(!s.includes("xformOp:translate.timeSamples") && !s.includes("instanceable"), "no xformOp animation, no instancing of animated meshes");
 }
@@ -202,20 +203,20 @@ assert(f.usda.includes('def Mesh "CubeC"') && f.usda.includes('def Xform "CubeC_
   const w = [];
   const k = glbToUsda(readFileSync(new URL("./skinned.glb", import.meta.url)), { onWarning: (m) => w.push(m) }).usda;
   // Sections are searched from `base` on (the Blob's own Skeleton comes first in the file).
-  const rigAt = k.indexOf('def SkelRoot "Rig"');
+  const rigAt = k.indexOf('def Xform "Rig"');
   const section = (from, to, base = rigAt) => {
     const i = k.indexOf(from, base);
     return k.slice(i, to ? k.indexOf(to, i) : undefined);
   };
   const skel = section('def Skeleton "Skeleton"', "def SkelAnimation");
   const bar = section('def Mesh "Bar"', 'def BlendShape "Bulge"');
-  assert(k.includes('def Scope "Skins"') && k.includes('def SkelRoot "Rig"'), "SkelRoot per skin under /Root/Skins");
+  assert(k.includes('def Scope "Skins"') && k.includes('def Xform "Rig"') && k.includes('def SkelRoot "Root"') && count(k, "def SkelRoot") === 1, "skins under the single /Root SkelRoot");
   // Parent-first joint order even though skin.joints lists the child first.
   assert(skel.includes('uniform token[] joints = ["Lower", "Lower/Upper"]'), "joint tokens parent-first");
   // bindTransforms = inverse(IBM); rest of the root joint includes the non-joint Armature translation.
   assert(skel.includes("bindTransforms = [( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0.5, 0, 0, 1) ), ( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0.5, 1, 0, 1) )]"), "bindTransforms");
   assert(skel.includes("restTransforms = [( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0.5, 0, 0, 1) ), ( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 1, 0, 1) )]"), "restTransforms (root includes Armature)");
-  assert(skel.includes("rel skel:animationSource = </Root/Skins/Rig/Animation>"), "animation source");
+  assert(skel.includes("rel skel:animationSource = </Root/Skins/Rig/Skeleton/Animation>"), "animation source");
   // Joint indices remapped to skeleton order; zero-weight slots point at joint 0.
   assert(bar.includes("primvars:skel:jointIndices = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0,"), "jointIndices remapped");
   assert(bar.includes("elementSize = 4") && bar.includes('prepend apiSchemas = ["SkelBindingAPI", "MaterialBindingAPI"]'), "elementSize / SkelBindingAPI (+ default material)");
@@ -230,7 +231,7 @@ assert(f.usda.includes('def Mesh "CubeC"') && f.usda.includes('def Xform "CubeC_
   assert(anim.includes('uniform token[] joints = ["Lower", "Lower/Upper"]') && anim.includes("quatf[] rotations.timeSamples"), "joint animation");
   // Morph-only node: its own SkelRoot with a joint-less Skeleton and a static weight.
   const blob = section('def Xform "Blob"', 'def Scope "Skins"', 0);
-  assert(blob.includes('def SkelRoot "BlobMesh"') && blob.includes("uniform token[] joints = []"), "morph-only SkelRoot");
+  assert(blob.includes('def Xform "BlobMesh"') && blob.includes("uniform token[] joints = []"), "morph-only SkelRoot");
   assert(blob.includes("float[] blendShapeWeights = [0.25]") && !blob.includes("timeSamples"), "static blend shape weight");
   assert(w.length === 0, `no warnings for skinned.glb: ${w}`);
 }

@@ -77,12 +77,12 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
 - KHR_texture_transform → `Transform2d_<slot>`（`UsdTransform2d`）。`texCoord` の上書きにも対応
 - 複数ノードで共有されるメッシュ → `class Xform "Meshes"` 下のプロトタイプ + `instanceable` な internal reference
 - **ノードアニメーションは既定でスケルトンに変換**（`animationMode: "skeleton"`）: 動くノードとその子孫を 1 つの Skeleton の
-  ジョイントにし、`/Root/Animated`（SkelRoot）にメッシュを移して該当ジョイントに剛体バインド（constant の jointIndices / weights、
-  geomBind = ノードの rest ワールド行列）。下記の設計判断 16
+  ジョイントにし、`/Root/Animated` にメッシュを移して該当ジョイントに剛体バインド（頂点ごとの jointIndices / weights、
+  geomBind = ノードの rest ワールド行列）。下記の設計判断 16, 17
 - `animationMode: "xform"` のときのアニメーション（1 本）: translation / rotation / scale → `xformOp:translate` / `orient` / `scale` の timeSamples。
   LINEAR はそのまま、STEP は次キーの直前（-0.001 timecode）に同値を足して保持、CUBICSPLINE は 24fps + 全キーでベイク。
   `startTimeCode` / `endTimeCode` / `timeCodesPerSecond = framesPerSecond = 24`
-- スキン → `/Root/Skins/<Skin>`（SkelRoot）に Skeleton / SkelAnimation / メッシュ。JOINTS_n / WEIGHTS_n すべて（elementSize = 4n）
+- スキン → `/Root/Skins/<Skin>`（Xform。`/Root` が SkelRoot）に Skeleton（子に SkelAnimation）/ メッシュ。JOINTS_n / WEIGHTS_n すべて（elementSize = 4n）
 - モーフターゲット → Mesh 子の `BlendShape`（offsets / normalOffsets、疎なら pointIndices）。スキンなしのメッシュは
   ノードの下に専用 SkelRoot（ジョイント 0 個の Skeleton）。ウェイトは node.weights / mesh.weights と weights アニメーション
 - EXT_mesh_gpu_instancing → インスタンスごとに `xformOp:transform`（T·R·S）付きの Xform。メッシュのプロトタイプへの
@@ -164,6 +164,11 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
    Apple の見本（toy_drummer / hummingbird）もスケルトンのみ。usdzconvert の `bindRigidDeformation` と同じ方式
    （ただし usdzconvert 自身はノードアニメーションを xformOp で書いている）。OpenUSD 上はどちらも正しく評価される。
    three.js と OpenUSD の頂点比較で animated.glb / BoxAnimated / CesiumMilkTruck / InterpolationTest が一致（CUBICSPLINE 以外 1e-5 以内）。
+17. **スケルトンがあれば `/Root` 自体を SkelRoot にする。** 確認ビューアは **Mac の Finder の Quick Look（スペースキー）**。
+   SkelRoot を `/Root`（Xform）の下に入れ子にした出力は USDA / USDC とも再生されず、defaultPrim が SkelRoot の構成だけ再生された
+   （USDA でも再生される＝形式は無関係）。各スケルトンの入れ物は Xform、SkelAnimation は Skeleton の子、剛体バインドの
+   jointIndices / Weights は頂点ごと。Apple の見本（toy_drummer / hummingbird）と同じ構成で、hummingbird は 1 つの SkelRoot に
+   Skeleton が 2 つある。
 
 
 ## OpenUSD バリデータに指摘されて直した点（再発注意）

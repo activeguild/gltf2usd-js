@@ -105,7 +105,7 @@ export function gltfToStage(asset, options = {}) {
   if (ctx.skins.size) {
     const skins = root.child(new Prim("Scope", "Skins"));
     for (const plan of ctx.skins.values()) {
-      const skelRoot = skins.child(new Prim("SkelRoot", plan.name));
+      const skelRoot = skins.child(new Prim("Xform", plan.name));
       const skelRootPath = `/Root/Skins/${plan.name}`;
       const shapes = [];
       const names = new Set(["Skeleton", "Animation"]);
@@ -121,7 +121,7 @@ export function gltfToStage(asset, options = {}) {
   // are bound rigidly to their node's joint (see planRigidAnimation).
   if (ctx.rigid) {
     const plan = ctx.rigid;
-    const skelRoot = root.child(new Prim("SkelRoot", plan.name));
+    const skelRoot = root.child(new Prim("Xform", plan.name));
     const skelRootPath = `/Root/${plan.name}`;
     const shapes = [];
     const names = new Set(["Skeleton", "Animation"]);
@@ -130,7 +130,7 @@ export function gltfToStage(asset, options = {}) {
       if (node.extensions?.KHR_lights_punctual) ctx.warn(`Node ${j}: lights under animated nodes are not supported with skeletal animation; skipped`);
       if (node.mesh === undefined || ctx.skinnedNodes.has(j)) return;
       if (node.extensions?.EXT_mesh_gpu_instancing) ctx.warn(`Node ${j}: EXT_mesh_gpu_instancing under an animated node is drawn once`);
-      buildMeshPrims(ctx, skelRoot, node.mesh, names, { plan, rigidJoint: k, skelRootPath, shapes, node: j });
+        buildMeshPrims(ctx, skelRoot, node.mesh, names, { plan, rigidJoint: k, skelRootPath, shapes, node: j });
     });
     buildSkeleton(ctx, plan, skelRoot, skelRootPath, shapes, (nd) => restWeights(ctx, nd));
     skelPrimsFirst(skelRoot);
@@ -153,6 +153,12 @@ export function gltfToStage(asset, options = {}) {
     if (ctx.defaultMaterialName) buildDefaultMaterial(scope, ctx.defaultMaterialName);
   }
   buildMaterialVariants(ctx, root);
+
+  // Anything skeletal (skins, morph targets, node animation): /Root itself is the one
+  // SkelRoot and the per-skeleton containers are plain Xforms. Mac Quick Look only
+  // played the animation with the defaultPrim being the SkelRoot (nested SkelRoots
+  // under an Xform root did not play); Apple's own samples are laid out this way.
+  if (ctx.hasSkeleton) root.type = "SkelRoot";
 
   return { layer, files: ctx.files };
 }
@@ -214,7 +220,7 @@ function buildNode(ctx, parent, nodeIndex, siblingNames, parentPath) {
       const mesh = ctx.json.meshes[node.mesh];
       const rootName = uniqueName(sanitize(mesh.name, `Mesh_${node.mesh}`), names);
       const skelRootPath = `${path}/${rootName}`;
-      const skelRoot = xform.child(new Prim("SkelRoot", rootName));
+      const skelRoot = xform.child(new Prim("Xform", rootName));
       const shapes = [];
       buildMeshPrims(ctx, skelRoot, node.mesh, new Set(["Skeleton", "Animation"]), { plan: null, skelRootPath, shapes, node: nodeIndex });
       buildSkeleton(ctx, NO_JOINTS, skelRoot, skelRootPath, shapes, (nd) => restWeights(ctx, nd));
@@ -516,7 +522,7 @@ function buildMeshPrimData(ctx, parent, prim, name, skel, gltfMesh) {
   // A primitive whose material only comes from KHR_materials_variants still needs the binding API.
   const variantMapped = !!prim.extensions?.KHR_materials_variants?.mappings?.length;
   const skinning = !skel?.plan ? null
-    : skel.rigidJoint !== undefined ? rigidPrimvars(skel.plan, skel.rigidJoint)
+    : skel.rigidJoint !== undefined ? rigidPrimvars(skel.plan, skel.rigidJoint, pos.count)
     : skinningPrimvars(ctx, skel.plan, prim, pos.count, name);
   // glTF's default material applies to primitives without one (vertex colors keep displayColor).
   const useDefaultMaterial = !hasMaterial && !variantMapped && attrs.COLOR_0 === undefined;
