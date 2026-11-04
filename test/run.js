@@ -83,6 +83,15 @@ for (const e of ["emissive_strength", "KHR_materials_ior", "KHR_materials_clearc
 
 // Warnings: unsupported extension, skipped LINES primitive; each reported once.
 assert(warnings.some((w) => w.includes("KHR_materials_transmission")), "warns about unsupported extension");
+// KHR_lights_punctual → UsdLux
+const lightBlock = (node) => f.usda.slice(f.usda.indexOf(`def Xform "${node}"`), f.usda.indexOf("}", f.usda.indexOf(`def Xform "${node}"`) + 200));
+assert(lightBlock("SunNode").includes('def DistantLight "Sun"') && lightBlock("SunNode").includes("float inputs:intensity = 2"), "directional → DistantLight");
+assert(lightBlock("BulbNode").includes('def SphereLight "Bulb"') && lightBlock("BulbNode").includes("bool treatAsPoint = 1"), "point → SphereLight (treatAsPoint)");
+assert(lightBlock("ConeNode").includes('prepend apiSchemas = ["ShapingAPI"]') && lightBlock("ConeNode").includes("float inputs:shaping:cone:angle = 28.64789"), "spot → ShapingAPI cone (degrees)");
+assert(lightBlock("ConeNode").includes("float inputs:shaping:cone:softness = 0.6"), "spot softness = (outer - inner) / outer");
+assert(warnings.some((m) => m.includes('Light "Bulb": range')), "range is reported");
+assert(!warnings.some((m) => m.includes("KHR_lights_punctual")), "lights extension is supported");
+
 // KHR_materials_unlit (material B): black diffuse, base color as emission, ior 1.
 assert(!warnings.some((w) => w.includes("KHR_materials_unlit")), "unlit is supported");
 assert(matB.includes("color3f inputs:diffuseColor = (0, 0, 0)") && matB.includes("color3f inputs:emissiveColor.connect = </Root/Materials/B/Texture_baseColor.outputs:rgb>"), "unlit: emission from base color");

@@ -35,6 +35,7 @@ export function buildCubeGlb() {
  *  - "Transformed": KHR_texture_transform (offset / rotation / scale)
  *  - a child node named like its parent's mesh prim (prim name collision)
  *  - "Coated": KHR_materials_emissive_strength / ior / clearcoat (+ transmission, unsupported)
+ *  - KHR_lights_punctual: directional "Sun", point "Bulb" (with range → warning), spot "Cone"
  * The quadrant texture (red / green on top, blue / yellow at the bottom) makes
  * flips and rotations visible in the demo.
  * @returns {Uint8Array} GLB bytes
@@ -49,10 +50,19 @@ export function buildFeatureGlb() {
     asset: { version: "2.0", generator: "test-features" },
     extensionsUsed: [
       "KHR_materials_unlit", "KHR_texture_transform", "KHR_materials_emissive_strength",
-      "KHR_materials_ior", "KHR_materials_clearcoat", "KHR_materials_transmission",
+      "KHR_materials_ior", "KHR_materials_clearcoat", "KHR_materials_transmission", "KHR_lights_punctual",
     ],
+    extensions: {
+      KHR_lights_punctual: {
+        lights: [
+          { name: "Sun", type: "directional", color: [1, 0.95, 0.9], intensity: 2 },
+          { name: "Bulb", type: "point", color: [1, 0.6, 0.2], intensity: 8, range: 10 },
+          { name: "Cone", type: "spot", intensity: 30, spot: { innerConeAngle: 0.2, outerConeAngle: 0.5 } },
+        ],
+      },
+    },
     scene: 0,
-    scenes: [{ nodes: [0, 1, 2, 3, 5] }],
+    scenes: [{ nodes: [0, 1, 2, 3, 5, 6, 7, 8] }],
     nodes: [
       { name: "Clamped", mesh: 0 },
       { name: "Unlit", mesh: 1, translation: [1.5, 0, 0] },
@@ -60,6 +70,10 @@ export function buildFeatureGlb() {
       { name: "Transformed", mesh: 3, translation: [4.5, 0, 0] },
       { name: "CubeC" }, // same name as its parent's mesh prim → must be renamed
       { name: "Coated", mesh: 4, translation: [6, 0, 0] },
+      // Lights shine along -Z: the sun is tilted down, the spot points straight down at "Coated".
+      { name: "SunNode", rotation: [-0.3826834, 0, 0, 0.9238795], extensions: { KHR_lights_punctual: { light: 0 } } },
+      { name: "BulbNode", translation: [2, 1.5, 1.5], extensions: { KHR_lights_punctual: { light: 1 } } },
+      { name: "ConeNode", translation: [6, 2.5, 0], rotation: [-0.7071068, 0, 0, 0.7071068], extensions: { KHR_lights_punctual: { light: 2 } } },
     ],
     meshes: [
       { name: "CubeA", primitives: [{ attributes: { POSITION: 0, NORMAL: 1, TEXCOORD_0: 2 }, indices: 3, material: 0 }] },

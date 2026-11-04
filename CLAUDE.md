@@ -50,6 +50,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
   `app.js` の `fixTextureTransforms()` で仕様どおりの行列に直してから左側に表示している
 - **新しい USD 機能を出力したら、`usd-preview.js` / `checks.js` もそれを読めるように更新する**
   （`UsdTransform2d`、`primvars:st1..3`、internal reference、xformOp の timeSamples、UsdSkel は対応済み）
+- UsdLux は DirectionalLight / PointLight / SpotLight（−Z 向き、強さはそのまま）で表示
 - UsdSkel は `SkinnedMesh`（ボーンは Skeleton prim の親の下、boneInverses = inverse(bindTransforms)、bindMatrix = geomBindTransform、
   影響が 5 つ以上なら上位 4 つ）と morph 属性（`pointIndices` は全点に展開）で表示
 - アニメーションがあると再生 / 一時停止とシークバーが出る。左は AnimationMixer（`LoopOnce` + 自前でループ）、
@@ -75,6 +76,8 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
 - スキン → `/Root/Skins/<Skin>`（SkelRoot）に Skeleton / SkelAnimation / メッシュ。JOINTS_n / WEIGHTS_n すべて（elementSize = 4n）
 - モーフターゲット → Mesh 子の `BlendShape`（offsets / normalOffsets、疎なら pointIndices）。スキンなしのメッシュは
   ノードの下に専用 SkelRoot（ジョイント 0 個の Skeleton）。ウェイトは node.weights / mesh.weights と weights アニメーション
+- KHR_lights_punctual → UsdLux（directional → DistantLight、point → SphereLight + treatAsPoint、spot → + ShapingAPI。
+  強さは glTF の lux / candela をそのまま。UsdLux は単位を明示していないので近似。range は警告。AR Quick Look はライトを無視する）
 - KHR_materials_unlit（近似: diffuseColor = 黒、baseColor → emissiveColor、`ior = 1` でフレネル反射を消す。他の PBR 入力は無視）
 - KHR_mesh_quantization（整数・正規化 accessor + ノード変換。gltf-transform で量子化した DamagedHelmet / CesiumMan を
   three.js と比較して一致を確認）
@@ -91,7 +94,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
 - POINTS / LINES プリミティブ（スキップして警告）
 - 2 本目以降のアニメーション（`options.animation` で 1 本選ぶ。警告あり）
 - ジョイントの間にある非ジョイントノードのアニメーション（警告）、morph target の TANGENT（警告）
-- カメラ、ライト
+- カメラ
 - USDC（Crate）出力
 
 ## 重要な設計判断（変えるときは理由を README にも書くこと）

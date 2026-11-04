@@ -67,6 +67,8 @@ export function buildUsdScene(layer, entries) {
     let obj;
     if (prim.type === "Mesh") {
       obj = buildMesh(prim);
+    } else if (prim.type === "DistantLight" || prim.type === "SphereLight") {
+      obj = buildLight(prim);
     } else {
       if (prim.type && !["Xform", "Scope", "SkelRoot"].includes(prim.type)) warn(`未対応の prim 型 ${prim.type}（Xform として扱う）`);
       obj = new THREE.Group();
@@ -194,6 +196,36 @@ export function buildUsdScene(layer, entries) {
     if (prim.props.has("skel:skeleton")) return bindSkel(prim, geom, material, corners, vertexOf, points.length);
     const mesh = new THREE.Mesh(geom, material);
     return mesh;
+  }
+
+  // ---------- UsdLux ----------
+
+  /**
+   * DistantLight → DirectionalLight, SphereLight → PointLight, + ShapingAPI → SpotLight.
+   * All shine along local -Z (target at (0, 0, -1)), like GLTFLoader's punctual lights.
+   * Intensities are used as-is (the converter copies glTF lux / candela).
+   */
+  function buildLight(prim) {
+    const get = (n, d) => prim.props.get(n)?.value ?? d;
+    const color = new THREE.Color().fromArray(get("inputs:color", [1, 1, 1]));
+    const intensity = get("inputs:intensity", 1) * 2 ** get("inputs:exposure", 0);
+    const group = new THREE.Group();
+    let light;
+    if (prim.type === "DistantLight") {
+      light = new THREE.DirectionalLight(color, intensity);
+    } else if (prim.props.has("inputs:shaping:cone:angle")) {
+      const angle = THREE.MathUtils.degToRad(get("inputs:shaping:cone:angle", 90));
+      light = new THREE.SpotLight(color, intensity, 0, Math.min(angle, Math.PI / 2), get("inputs:shaping:cone:softness", 0), 2);
+    } else {
+      light = new THREE.PointLight(color, intensity, 0, 2);
+      if (!get("treatAsPoint", false) && get("inputs:radius", 0.5) > 0) warn("SphereLight の半径は点光源として表示");
+    }
+    group.add(light);
+    if (light.target) {
+      light.target.position.set(0, 0, -1);
+      group.add(light.target);
+    }
+    return group;
   }
 
   // ---------- UsdSkel ----------

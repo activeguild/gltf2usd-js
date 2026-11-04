@@ -37,6 +37,7 @@ const SUPPORTED_EXTENSIONS = new Set([
   // verified against three.js with gltf-transform-quantized DamagedHelmet / CesiumMan.
   "KHR_mesh_quantization",
   "KHR_materials_unlit",
+  "KHR_lights_punctual",
 ]);
 
 /** USD primvar name for glTF TEXCOORD_n: st, st1, st2, ... */
@@ -191,6 +192,9 @@ function buildNode(ctx, parent, nodeIndex, siblingNames, parentPath) {
     }
   }
 
+  const lightIndex = node.extensions?.KHR_lights_punctual?.light;
+  if (lightIndex !== undefined) buildLight(ctx, xform, lightIndex, names);
+
   for (const child of node.children || []) buildNode(ctx, xform, child, names, path);
 }
 
@@ -206,6 +210,45 @@ function buildMeshPrims(ctx, parent, meshIndex, names, skel = null) {
     const primName = uniqueName(mesh.primitives.length > 1 ? `${base}_${pi}` : base, names);
     buildMeshPrim(ctx, parent, prim, primName, skel, mesh);
   });
+}
+
+/**
+ * KHR_lights_punctual → UsdLux. Both shine along the node's -Z axis.
+ * UsdLux does not pin intensity to photometric units; DistantLight's fallback of
+ * 50000 "approximates sunlight", so glTF lux (directional) and candela (point /
+ * spot) are copied as-is. Spot cones use ShapingAPI: angle = outer cone,
+ * softness = (outer - inner) / outer.
+ */
+function buildLight(ctx, xform, index, names) {
+  const light = ctx.json.extensions?.KHR_lights_punctual?.lights?.[index];
+  if (!light) {
+    ctx.warn(`KHR_lights_punctual: light ${index} does not exist; ignored`);
+    return;
+  }
+  const name = uniqueName(sanitize(light.name, `Light_${index}`), names);
+  const color = light.color ?? [1, 1, 1];
+  const intensity = light.intensity ?? 1;
+  if (light.range !== undefined) ctx.warn(`Light "${name}": range has no UsdLux equivalent; ignored`);
+  let prim;
+  if (light.type === "directional") {
+    prim = xform.child(new Prim("DistantLight", name));
+  } else if (light.type === "point" || light.type === "spot") {
+    const spot = light.type === "spot";
+    prim = xform.child(new Prim("SphereLight", name, { metadata: spot ? { "prepend apiSchemas": ["ShapingAPI"] } : {} }));
+    prim.attr("bool", "treatAsPoint", true);
+    prim.attr("float", "inputs:radius", 0);
+    if (spot) {
+      const outer = light.spot?.outerConeAngle ?? Math.PI / 4;
+      const inner = light.spot?.innerConeAngle ?? 0;
+      prim.attr("float", "inputs:shaping:cone:angle", (outer * 180) / Math.PI);
+      prim.attr("float", "inputs:shaping:cone:softness", outer > 0 ? Math.min(1, Math.max(0, (outer - inner) / outer)) : 0);
+    }
+  } else {
+    ctx.warn(`Light "${name}": unknown type ${light.type}; ignored`);
+    return;
+  }
+  prim.attr("color3f", "inputs:color", color);
+  prim.attr("float", "inputs:intensity", intensity);
 }
 
 /** Skeleton and SkelAnimation first in a SkelRoot (readability only). */
