@@ -131,7 +131,10 @@ export class GltfAsset {
   _loadBuffer(buffer, index) {
     if (buffer.uri === undefined) {
       // EXT_meshopt_compression: a "fallback" buffer has no data; its views must be decoded.
-      if (buffer.extensions?.EXT_meshopt_compression?.fallback) return null;
+      // KHR_meshopt_compression (not supported) marks its fallback buffers the same way; their
+      // views are then unreadable, so the affected meshes are skipped with a warning.
+      const ext = buffer.extensions;
+      if (ext?.EXT_meshopt_compression?.fallback || ext?.KHR_meshopt_compression?.fallback) return null;
       if (index !== 0 || !this.bin) throw new GltfValidationError(`Buffer ${index} has no uri and no GLB BIN chunk`);
       return this._checkBufferSize(this.bin, buffer, index, "GLB BIN chunk");
     }

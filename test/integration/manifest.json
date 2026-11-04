@@ -272,6 +272,75 @@
       ]
     },
     {
+      "id": "MeshoptCubeTest-khr",
+      "features": [
+        "KHR_meshopt_compression (unsupported: compressed meshes skipped with a warning)",
+        "texture"
+      ],
+      "files": [
+        {
+          "path": "Models/MeshoptCubeTest/glTF-Meshopt/MeshoptCubeTest.gltf",
+          "sha256": "b5947609f3d8aba58de3d43101df3b635ffaaab5849431f8518af6a98a040433",
+          "bytes": 68034
+        },
+        {
+          "path": "Models/MeshoptCubeTest/glTF-Meshopt/MeshoptCubeTest.bin",
+          "sha256": "6578c1d82c5cc2b228e9513e37f348ca89cdb24b5985aa0567efef8d3c014360",
+          "bytes": 10528
+        },
+        {
+          "path": "Models/MeshoptCubeTest/glTF-Meshopt/row0.png",
+          "sha256": "a26715d56e91e83b19e336174494bd3e39cfc3a5f1b6f1166951a9ec38bf6baa",
+          "bytes": 1568
+        },
+        {
+          "path": "Models/MeshoptCubeTest/glTF-Meshopt/row1.png",
+          "sha256": "8b005615419b1efb98d3cce2fd9529fc53bd34337a317aece8cd4a7558053ec4",
+          "bytes": 3268
+        },
+        {
+          "path": "Models/MeshoptCubeTest/glTF-Meshopt/row2.png",
+          "sha256": "b4e1d53d2a5492adc2d148b19b421733fb23edf1a0aded6fea1ec11c710f11b0",
+          "bytes": 3324
+        },
+        {
+          "path": "Models/MeshoptCubeTest/glTF-Meshopt/row3.png",
+          "sha256": "ae96accde34a0a35ffe63a2fa4f777eaeacf6d3157e6ef69ba5da285949d7f77",
+          "bytes": 3026
+        },
+        {
+          "path": "Models/MeshoptCubeTest/glTF-Meshopt/row4.png",
+          "sha256": "689cf0ae16c22125a4a1ad44e0431aed1a92a101def096161d133ec56906bca3",
+          "bytes": 2884
+        },
+        {
+          "path": "Models/MeshoptCubeTest/glTF-Meshopt/col0.png",
+          "sha256": "250410286de74c532ee877b51b039228742a2e4d7fd611dce29230e841ab75f7",
+          "bytes": 1511
+        },
+        {
+          "path": "Models/MeshoptCubeTest/glTF-Meshopt/col1.png",
+          "sha256": "10a6db3432385dceaacb15a66f94ce79c6c2460d9b1ef1f25c3399bd2d0ee521",
+          "bytes": 1563
+        },
+        {
+          "path": "Models/MeshoptCubeTest/glTF-Meshopt/col2.png",
+          "sha256": "28f15b21a88b213315e13cdcb7914007934e69f3ed8b8dc9495f469d865d57e7",
+          "bytes": 1458
+        },
+        {
+          "path": "Models/MeshoptCubeTest/glTF-Meshopt/col3.png",
+          "sha256": "d518c528b85d9c2c5915c5822b152ac8c162da1bc11a9581e5486d53ebaeb11a",
+          "bytes": 1586
+        },
+        {
+          "path": "Models/MeshoptCubeTest/glTF-Meshopt/col4.png",
+          "sha256": "8f5659a0451392c567217b432a6c83f65a6c22eb3a225e853daa45ec847abdb3",
+          "bytes": 1062
+        }
+      ]
+    },
+    {
       "id": "BrainStem-meshopt",
       "features": [
         "EXT_meshopt_compression",

@@ -10,13 +10,14 @@ npm パッケージ名: `gltf2usd-js`。
 
 ## 現在の状態（段階 1〜4 完了。要相談事項は「要相談」を参照）
 
-`src/` 10 ファイル。テスト GLB（`cube.glb`、`features.glb`、`animated.glb`、`skinned.glb`、外部ファイル付き `gltf/cube.gltf`）と
+`src/` 11 ファイル。テスト GLB（`cube.glb`、`features.glb`、`animated.glb`、`skinned.glb`、外部ファイル付き `gltf/cube.gltf`）と
 Khronos サンプル（BoxTextured / CesiumMilkTruck / DamagedHelmet / BoxAnimated / InterpolationTest / RiggedSimple / RiggedFigure /
 CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 の全 30 バリデータに通して error 0 を確認済み。
 
 | ファイル | 役割 | 備考 |
 |---|---|---|
-| `src/glb.js`  | `parseGLB()`, `GltfAsset` | accessor デコード（byteStride / normalized / sparse 対応）、`imageBytes()` |
+| `src/glb.js`  | `parseGLB()`, `GltfAsset` | GLB ヘッダ / チャンクの検証、accessor デコード（byteStride / normalized / sparse / 行列の列パディング）、`imageBytes()` |
+| `src/validate.js` | `validateDocument()`, `GltfValidationError`, `DEFAULT_LIMITS`, `elementLayout()` | 変換前の構造検証（参照・バイト範囲・ノード階層・スキン・アニメーション）とリソース上限 |
 | `src/convert.js` | `gltfToStage(asset, opts)` → `{ layer, files }`（glTF → USD IR） | ノード階層、Mesh、UsdPreviewSurface、警告 |
 | `src/animation.js` | `evaluateAnimation(ctx, which)`, `sampleAt()` | glTF アニメーション 1 本 → ノードごとの TRS / weights サンプル |
 | `src/skin.js` | `planSkins()`, `buildSkeleton()`, `skinningPrimvars()` | glTF skin → SkelRoot / Skeleton / SkelAnimation、jointIndices / Weights |
@@ -26,7 +27,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
 | `src/names.js` | `sanitize()`, `uniqueName()` | prim 名・ジョイント名 |
 | `src/ir.js` | `Layer` / `Prim`（`attr()` / `rel()` / `child()`） | USD 側のプリム・属性ツリー。値の表現規約は冒頭コメント |
 | `src/usda.js` | `writeUsda(layer)` → USDA 文字列 | 型名から書式を決める。timeSamples 対応 |
-| `src/usdz.js` | `packUsdz(entries)` → `Uint8Array` | stored-only zip、64 バイトアライン、CRC32 自前 |
+| `src/usdz.js` | `packUsdz(entries)` → `Uint8Array`、`planLayout()`、`UsdzLimitError` | stored-only zip、64 バイトアライン、CRC32 自前。ZIP の上限とエントリ名を書く前に検査 |
 | `src/index.js`| `glbToUsda()`, `glbToUsdz()`, `gltfToUsda()` | 公開 API。名前は glb だが `.gltf` も受け付ける |
 | `cli.js`      | `node cli.js in.glb\|in.gltf out.usdz\|out.usda` | `.gltf` の外部ファイルは同じフォルダ以下からのみ読む |
 | `test/cube-glb.js` | テスト用 GLB をメモリ上で生成（Node / ブラウザ共用） | `buildCubeGlb()`（段階 1）、`buildFeatureGlb()`（段階 2）、`buildAnimatedGlb()`（段階 3）、`buildSkinnedGlb()`（段階 4）、`buildCubeGltf()` |
@@ -34,6 +35,9 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
 | `test/png.js` | テスト画像用の小さな PNG エンコーダ | |
 | `test/meshopt-vectors.js` | meshopt のテストベクトル（meshoptimizer のエンコーダで生成した入力とリファレンス出力） | 依存なしでデコーダを検証するため |
 | `test/run.js` | JS 側の単体テスト（prim 名、zip アライン検証） | `npm test` |
+| `test/validation.js` / `accessor.js` / `color.js` / `usdz.js` / `edge-cases.js` | 入力検証、行列 accessor、頂点カラー / アルファ、USDZ の上限、アニメーション / スキンの境界値 | `npm test`（`usdz.js` 以外はブラウザでも動く） |
+| `test/gltf-builder.js` | テスト用に glTF / GLB を組み立てる小さなヘルパ | |
+| `test/integration/` | Khronos glTF-Sample-Assets（コミット固定、SHA-256 照合）の 19 モデルで変換・zip・内容・OpenUSD 検証 | `npm run test:integration`（ネットワーク。`-- --offline` でキャッシュのみ） |
 | `test/validate.py` | OpenUSD で開いてバリデータ実行 | `pip install usd-core` が必要 |
 | `demo/` | Web テストアプリ（`npm run demo` → `http://localhost:8080/demo/`） | 下記 |
 
@@ -100,8 +104,16 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
   KHR_materials_clearcoat（`inputs:clearcoat` / `clearcoatRoughness`、テクスチャは R / G。clearcoatNormal は警告）
 - `options.onWarning`: 未対応拡張、POINTS / LINES、POSITION なし、アニメーション / スキン / カメラ / モーフ、複数シーン、
   解決できない画像、PNG / JPEG 以外の画像、マテリアルが使う TEXCOORD_n が Mesh にない
+- 入力検証（設計判断 19）: 不正な入力は `GltfValidationError`。`options.limits`（既定は `DEFAULT_LIMITS`）
+- COLOR_0 の VEC4 アルファ → BLEND / MASK のマテリアルで `primvars:displayOpacity` + `UsdPrimvarReader_float`（設計判断 20）
+- 行列 accessor（MAT2 / MAT3）の列ごとの 4 バイト境界
+- USDZ の ZIP 上限（設計判断 21）。超える場合は `UsdzLimitError`
 
 ### 未対応（既知）
+- マテリアルがあるメッシュの頂点カラー RGB（`displayColor` は書くがマテリアルに掛けない。glTF は baseColor に掛ける）
+- 頂点アルファ × baseColorTexture のアルファ（UsdPreviewSurface では掛けられない。テクスチャのアルファを使い警告）
+- KHR_meshopt_compression（EXT_ 版とはバージョン・フィルタが違う。fallback buffer を読めないものとして扱い、該当メッシュをスキップして警告）
+- ZIP64（4 GiB を超える USDZ は `UsdzLimitError`）
 - KHR_materials_transmission / volume / specular / sheen など（警告）
 - KHR_draco_mesh_compression: 非圧縮の fallback があればそれを使う。なければそのプリミティブをスキップして警告
 - 読めないデータ（Draco の fallback なし、壊れた meshopt 列など）は `DataUnavailableError` になり、
@@ -176,6 +188,23 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
    （変形は変わらないので残している）。
    この 16〜18 の出力（USDA ルートの USDZ）は、iOS の AR Quick Look でもスキン・ノードアニメーションとも再生されることを確認済み。
    Reality Converter だけはルートレイヤーが USDC でないと受け付けない（段階 5、issue #1）。
+19. **入力は変換前に検証する（`src/validate.js`）。** データを読む・シーンをたどるのに使う参照とバイト範囲（buffer / bufferView /
+   accessor / mesh / node / skin / animation）が不正なら `GltfValidationError`（何番の何が不正かを書く）。0 埋め・切り詰めで続けない。
+   マテリアル / テクスチャ / 画像 / ライト / バリアントの不正な参照は従来どおり無視して警告（見た目のデータで、無くても形は正しい）。
+   GLB は totalLength = 入力サイズ、チャンク長は 4 の倍数、JSON が先頭で 1 つ、BIN は 2 番目で 1 つまで、未知のチャンクは読み飛ばす。
+   accessor の byteOffset のアライメント違反は DataView で読めるので拒否しない（実ファイルを壊さないため）。
+   アニメーションのキーが壊れたチャンネル（時刻が減る、NaN / Infinity、個数が合わない）は警告してスキップ。同時刻のキーは最後を残す。
+   JOINTS の範囲外（ウェイト > 0）・負 / NaN のウェイトはエラー、ウェイトの合計が 1 でない頂点は警告してそのまま書く。
+   `DEFAULT_LIMITS` はメモリとスタックを守るためだけのもの（入力 2 GiB、accessor 1 本 2^26 値、ノードの深さ 1024 など）。
+   変更前後で 26 個のフィクスチャの出力がバイト単位で一致することを確認済み。
+20. **頂点アルファ。** glTF はアルファ = factor.a × テクスチャ.a × COLOR_0.a で、BLEND / MASK のときだけ使う（OPAQUE・既定マテリアルは無視）。
+   UsdPreviewSurface は displayOpacity を自動では使わないので、頂点アルファ付きで使われる BLEND / MASK マテリアル（テクスチャなし）は
+   `inputs:opacity` を `UsdPrimvarReader_float`（`displayOpacity`、fallback = factor.a）から取り、メッシュの displayOpacity は
+   COLOR_0.a × factor.a。マテリアルを共有する頂点アルファなしのメッシュは fallback で factor.a のまま。OpenUSD の UsdShade で接続が
+   解決されることは確認済み。**Quick Look / AR Quick Look での表示は未確認**（usdzconvert は頂点アルファを捨てている）。
+21. **USDZ の ZIP 上限は書く前に検査する。** `planLayout()` が長さだけから全オフセットを計算し、32 / 16 ビットのフィールドに収まらなければ
+   `UsdzLimitError`（"USDZ exceeds supported ZIP size limits"）。エントリ名は相対・スラッシュ区切り・`.` `..` 空セグメントなし・
+   大文字小文字を無視して一意、先頭は .usda / .usdc / .usd。出力バイトは変更前と同一。
 
 
 ## OpenUSD バリデータに指摘されて直した点（再発注意）
@@ -195,6 +224,7 @@ node cli.js test/animated.glb /tmp/animated.usdz && python3 test/validate.py /tm
 node cli.js test/skinned.glb /tmp/skinned.usdz && python3 test/validate.py /tmp/skinned.usdz
 node cli.js test/features.glb /tmp/features.usdz && python3 test/validate.py /tmp/features.usdz
 node cli.js test/gltf/cube.gltf /tmp/cube-gltf.usdz && python3 test/validate.py /tmp/cube-gltf.usdz
+npm run test:integration                   # Khronos サンプル 19 モデル（初回はネットワーク）。OpenUSD 検証込み
 npm run demo                               # 見た目の確認: サンプルと fixtures の GLB を左右で比較
 ```
 

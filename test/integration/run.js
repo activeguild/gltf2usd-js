@@ -92,6 +92,10 @@ function checkContent(json, usda, zipNames, warnings, errors) {
   if (dracoOnly.length) {
     if (!warnings.some((w) => /Draco/.test(w))) errors.push("content: Draco primitives were skipped without a warning");
   }
+  // Unsupported compression must be reported, never silently dropped.
+  if ((json.extensionsUsed || []).includes("KHR_meshopt_compression") && !warnings.some((w) => /KHR_meshopt_compression/.test(w))) {
+    errors.push("content: KHR_meshopt_compression is not reported as unsupported");
+  }
   const usedMaterials = new Set(triangles.filter((p) => !dracoOnly.includes(p)).map((p) => p.material).filter((m) => m !== undefined));
   const materialPrims = count(/def Material "/g);
   if (materialPrims < usedMaterials.size) errors.push(`content: ${usedMaterials.size} glTF materials are used, ${materialPrims} Material prims written`);

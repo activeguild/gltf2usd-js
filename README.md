@@ -24,11 +24,25 @@ const usdz2 = glbToUsdz(gltfText, { resources: { "scene.bin": binBytes, "texture
 
 // 変換で捨てた情報（未対応の拡張・プリミティブ・アニメーション等）を受け取る
 glbToUsdz(buf, { onWarning: (msg) => console.warn(msg) });
+
+// 不正な入力は GltfValidationError、ZIP（非 ZIP64）に収まらない出力は UsdzLimitError
+import { GltfValidationError, UsdzLimitError, DEFAULT_LIMITS } from "./src/index.js";
+try {
+  glbToUsdz(buf, { limits: { maxInputBytes: 200 * 2 ** 20 } }); // 上限は DEFAULT_LIMITS を上書き（Infinity で無効）
+} catch (e) {
+  if (e instanceof GltfValidationError) console.error("glTF として不正:", e.message);
+  else throw e;
+}
 ```
 
 CLI: `node cli.js in.glb out.usdz`（`.usda` を指定すればテキスト出力。`in.gltf` なら同じフォルダの外部ファイルを読む）
 
-テスト: `npm test`（テスト用 GLB の生成も含む）
+テスト: `npm test`（テスト用 GLB の生成も含む。ネットワーク不要）
+
+結合テスト: `npm run test:integration`。Khronos glTF-Sample-Assets の 19 モデル（コミット固定、ファイルごとに SHA-256 を照合）を
+取得して `test/.cache/` に保存し、USDA / USDZ への変換、zip の読み戻し、主要な情報（メッシュ・マテリアル・テクスチャ・スケルトン・
+BlendShape・アニメーション・バリアント）が残っているかを確認します。`pip install usd-core` があれば OpenUSD のバリデータも実行します。
+`-- --offline` でキャッシュだけを使い、`-- Fox Box` でモデルを絞れます。
 
 ## Web デモ（テストアプリ）
 
@@ -68,7 +82,9 @@ GLB を選ぶかドロップすると（またはサンプルボタンで）、�
 - `.gltf` と外部 `.bin` / 画像（`options.resources`）
 - ノード階層、TRS または matrix（`xformOp:transform`）
 - TRIANGLES / TRIANGLE_STRIP / TRIANGLE_FAN、インデックス有無どちらも可
-- POSITION / NORMAL / TEXCOORD_0（V 反転済み）/ COLOR_0（displayColor）
+- POSITION / NORMAL / TEXCOORD_0（V 反転済み）/ COLOR_0（displayColor。VEC4 のアルファは BLEND / MASK のマテリアルで
+  `primvars:displayOpacity`。下の設計メモ）
+- 行列 accessor（MAT2 / MAT3 / MAT4）は列ごとの 4 バイト境界（パディング）を考慮して読む
 - `extent`、`MaterialBindingAPI`、`doubleSided`
 - マテリアル: baseColor (factor/texture)、metallicRoughness、normal、occlusion、emissive、alphaMode (BLEND/MASK)
 - テクスチャの USDZ 同梱（PNG / JPEG）。同名画像は `name_1.png` のように重複回避
@@ -90,7 +106,17 @@ GLB を選ぶかドロップすると（またはサンプルボタンで）、�
 - モーフターゲット → BlendShape（ウェイトの固定値とアニメーション。スキンなしでも可）
 - 複数ノードで共有されるメッシュの instancing（`/Root/Meshes` のプロトタイプを `instanceable` で参照。`{ instancing: false }` で複製）
 - `options.onWarning` で、変換で捨てた情報を通知（CLI は標準エラーに出力）
+- 入力の検証（GLB のヘッダ / チャンク、buffer / bufferView / accessor の範囲、参照、ノード階層、スキン、アニメーション）と
+  リソース上限（`options.limits`）。不正な入力は `GltfValidationError`
+- USDZ の ZIP 上限（4 GiB・65535 エントリ・名前 65535 バイト）とエントリ名の検査。超える場合は `UsdzLimitError`（ZIP64 は未対応）
 - OpenUSD 26.x の全バリデータで error 0 を確認済み
+
+## 未対応（既知）
+
+- マテリアルがあるメッシュの頂点カラー RGB（glTF は baseColor に掛けるが、`displayColor` を書くだけでマテリアルには反映しない）
+- 頂点アルファとベースカラーテクスチャのアルファの掛け合わせ（テクスチャのアルファを使い、警告）
+- KHR_meshopt_compression（EXT_ 版のみ対応。KHR_ 版は未対応の拡張として警告）、Draco のデコード
+- KHR_materials_transmission / volume / specular / sheen など、カメラ、2 本目以降のアニメーション、USDC 出力、ZIP64
 
 ## 設計メモ
 
@@ -101,6 +127,20 @@ GLB を選ぶかドロップすると（またはサンプルボタンで）、�
 - KHR_texture_transform は V 反転後の st 空間に書き直すと `UsdTransform2d` と同じ形（scale → 回転 → 平行移動）になる。
   平行移動だけ `(offset.x + sin·scale.y, 1 - offset.y - cos·scale.y)` に変換する。
 - USDZ は圧縮禁止・各ファイルのデータ先頭が 64 バイト境界必須。zip の extra field でパディングしている。
+  書き出す前に全エントリの位置を長さだけから計算し、32 ビット / 16 ビットのフィールドに収まらなければ書かずにエラーにする
+  （壊れた zip を作らないため。ZIP64 は Quick Look などの対応が不確かなので実装していない）。
+- **入力の検証**: データを読む・シーンをたどるのに使う参照とバイト範囲（buffer / bufferView / accessor / mesh / node / skin /
+  animation）は変換前にすべて検査し、不正なら `GltfValidationError`（何番の何が不正かをメッセージに入れる）。0 埋めや切り詰めで
+  変換を続けることはしない。マテリアル / テクスチャ / 画像 / ライト / バリアントの不正な参照は、従来どおりその参照を無視して警告する
+  （見た目のデータで、無くても形は正しく出せるため）。アニメーションのキーが壊れている（時刻が減る、NaN、個数が合わない）チャンネルは
+  警告してスキップ、同じ時刻のキーは最後のものを残す（USD は 1 時刻に 1 値）。リソース上限の既定値（`DEFAULT_LIMITS`）は
+  メモリとスタックを守るためだけのもので、Khronos のサンプルや一般的な AR 用モデルよりずっと大きい。
+- **頂点アルファ**: glTF ではアルファ = baseColorFactor.a × テクスチャ.a × COLOR_0.a で、使われるのは alphaMode が BLEND / MASK の
+  ときだけ（OPAQUE と既定マテリアルでは無視）。UsdPreviewSurface は `displayOpacity` を自動では使わないので、頂点アルファ付きで
+  使われる BLEND / MASK マテリアルは `inputs:opacity` を `UsdPrimvarReader_float`（`displayOpacity`、fallback = factor.a）から取り、
+  メッシュの `displayOpacity` は COLOR_0.a × factor.a にする（頂点アルファのないメッシュは fallback で factor.a のまま）。
+  UsdPreviewSurface は 2 つの入力を掛け合わせられないので、baseColorTexture があるときはテクスチャのアルファを使い、
+  頂点アルファは反映しない（警告）。頂点カラーの RGB は従来どおりマテリアルには反映しない（上の「未対応」）。
 
 ## ロードマップ
 
