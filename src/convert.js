@@ -696,14 +696,23 @@ function displayOpacity(ctx, prim, alpha) {
   return alpha.map((a) => a * factorAlpha);
 }
 
-/** The ramp texture for vertex alpha (gray = alpha = x / 255), packaged once. */
-function vertexAlphaRampFile(ctx) {
-  if (ctx.rampFile) return ctx.rampFile;
-  let name = `${ctx.texturePrefix}vertex_alpha_ramp.png`;
-  for (let i = 1; ctx.usedFileNames.has(name.toLowerCase()); i++) name = `${ctx.texturePrefix}vertex_alpha_ramp_${i}.png`;
+/**
+ * The ramp texture for vertex alpha, packaged once per kind: a linear ramp (gray = alpha
+ * = x / 255) for BLEND, or for MASK a step that is 0 below texel `step` and 1 from it on.
+ * Quick Look draws MASK fragments above the threshold with their partial opacity (seen as
+ * a fade inside the cut-out), while glTF draws them opaque; a 0 / 1 ramp makes both agree.
+ */
+function vertexAlphaRampFile(ctx, step = null) {
+  const key = step === null ? "ramp" : `step_${step}`;
+  ctx.rampFiles ??= new Map();
+  if (ctx.rampFiles.has(key)) return ctx.rampFiles.get(key);
+  const base = `vertex_alpha_${key}`;
+  let name = `${ctx.texturePrefix}${base}.png`;
+  for (let i = 1; ctx.usedFileNames.has(name.toLowerCase()); i++) name = `${ctx.texturePrefix}${base}_${i}.png`;
   ctx.usedFileNames.add(name.toLowerCase());
-  ctx.files.push({ name, bytes: encodeGrayAlphaPng(RAMP_SIZE, 1, (x) => [x, x]) });
-  ctx.rampFile = name;
+  const pixel = step === null ? (x) => [x, x] : (x) => (x >= step ? [255, 255] : [0, 0]);
+  ctx.files.push({ name, bytes: encodeGrayAlphaPng(RAMP_SIZE, 1, pixel) });
+  ctx.rampFiles.set(key, name);
   return name;
 }
 
@@ -820,9 +829,19 @@ function buildMaterial(ctx, scope, mat, index) {
   const constantOpacity = () => {
     if (alphaMode === "OPAQUE") return;
     if (ctx.vertexAlphaMaterials.has(index)) {
+      // BLEND: ramp × factor.a. MASK: glTF keeps a fragment when COLOR_0.a × factor.a ≥ cutoff,
+      // i.e. COLOR_0.a ≥ cutoff / factor.a: the first opaque texel of a 0 / 1 step ramp.
+      let file, scale = [1, 1, 1, baseColor[3]];
+      if (alphaMode === "MASK") {
+        const limit = baseColor[3] > 0 ? (mat.alphaCutoff ?? 0.5) / baseColor[3] : Infinity;
+        file = vertexAlphaRampFile(ctx, Math.min(RAMP_SIZE, Math.max(0, Math.ceil(limit * (RAMP_SIZE - 1) - 1e-6))));
+        scale = [1, 1, 1, 1];
+      } else {
+        file = vertexAlphaRampFile(ctx);
+      }
       textures.push({
-        shader: "Texture_vertexAlpha", file: vertexAlphaRampFile(ctx), wrapS: "clamp", wrapT: "clamp",
-        texCoord: VERTEX_ALPHA_UV, transform: null, colorSpace: "raw", scale: [1, 1, 1, baseColor[3]],
+        shader: "Texture_vertexAlpha", file, wrapS: "clamp", wrapT: "clamp",
+        texCoord: VERTEX_ALPHA_UV, transform: null, colorSpace: "raw", scale,
       });
       surface.attr("float", "inputs:opacity", undefined, connect("Texture_vertexAlpha", "a"));
     } else {

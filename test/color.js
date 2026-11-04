@@ -109,10 +109,35 @@ for (const [factor, label] of [[1, "factor 1"], [0.5, "factor 0.5"]]) {
   assert(raw[0] === 0 && raw[1 + 2 * 128] === 128 && raw[2 + 2 * 128] === 128 && raw[2 + 2 * 255] === 255, "ramp pixels: gray = alpha = x");
 }
 
-// VEC4 + MASK: same, plus the cutoff.
+// VEC4 + MASK: a 0 / 1 step ramp at COLOR_0.a = cutoff / factor.a (Quick Look draws partial
+// opacity inside a MASK cut-out; glTF draws it opaque), scale 1, threshold = cutoff.
+for (const [cutoff, factor, step] of [[0.25, 1, 64], [0.25, 0.5, 128], [0.5, 1, 128], [1, 0.5, 256]]) {
+  const label = `MASK cutoff ${cutoff} factor ${factor}`;
+  const { usda, files } = glbToUsda(colored({ colors: RGBA, material: { alphaMode: "MASK", alphaCutoff: cutoff, pbrMetallicRoughness: { baseColorFactor: [1, 1, 1, factor] } } }));
+  const ramp = usda.slice(usda.indexOf('def Shader "Texture_vertexAlpha"'));
+  assert(usda.includes("Texture_vertexAlpha.outputs:a") && line(usda, "opacityThreshold").includes(`${cutoff}`), `${label}: ramp + threshold`);
+  assert(ramp.includes(`@textures/vertex_alpha_step_${step}.png@`) && ramp.includes("float4 inputs:scale = (1, 1, 1, 1)"), `${label}: step ramp ${step}: ${ramp.match(/@.*@/)?.[0]}`);
+  const png = files.find((f) => f.name === `textures/vertex_alpha_step_${step}.png`).bytes;
+  const idat = png.indexOf(0x49, 33);
+  const raw = png.subarray(idat + 4 + 2 + 5, idat + 4 + 2 + 5 + 513);
+  const alphaAt = (x) => raw[2 + 2 * x];
+  assert((step === 0 || alphaAt(step - 1) === 0) && (step >= 256 || alphaAt(step) === 255), `${label}: step at texel ${step}`);
+}
 {
-  const { usda } = convert(colored({ colors: RGBA, material: { alphaMode: "MASK", alphaCutoff: 0.25 } }));
-  assert(usda.includes("Texture_vertexAlpha.outputs:a") && line(usda, "opacityThreshold").includes("0.25"), "MASK: ramp + threshold");
+  // BLEND and MASK materials in one file get separate ramps, each packaged once.
+  const glb = colored({ colors: RGBA, material: { alphaMode: "MASK" } });
+  const dvj = new DataView(glb.buffer);
+  const jsonLen = dvj.getUint32(12, true);
+  const json = JSON.parse(new TextDecoder().decode(glb.subarray(20, 20 + jsonLen)));
+  json.materials.push({ name: "B", alphaMode: "BLEND" }, { name: "B2", alphaMode: "BLEND" });
+  for (const m of [1, 2]) {
+    json.meshes.push({ name: `M${m}`, primitives: [{ attributes: { POSITION: 0, COLOR_0: 1 }, material: m }] });
+    json.nodes.push({ mesh: json.meshes.length - 1 });
+    json.scenes[0].nodes.push(json.nodes.length - 1);
+  }
+  const { files } = glbToUsda(makeGlb(json, glb.subarray(28 + jsonLen)));
+  const names = files.map((f) => f.name).sort().join();
+  assert(names === "textures/vertex_alpha_ramp.png,textures/vertex_alpha_step_128.png", `ramps packaged once each: ${names}`);
 }
 
 // A mesh without vertex alpha that shares the material gets alpha 1 in its ramp UVs.

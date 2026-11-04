@@ -141,7 +141,8 @@ GLB を選ぶかドロップすると（またはサンプルボタンで）、�
   そこで、頂点アルファ付きで使われる BLEND / MASK マテリアル（ベースカラーテクスチャなし）は、opacity を 256 × 1 のアルファの
   ランプ画像（`textures/vertex_alpha_ramp.png`、× factor.a）から取り、メッシュには u = COLOR_0.a の UV（`primvars:vertexAlphaUV`）を書く。
   UV は頂点カラーと同じく面内で線形補間されるので、見た目は頂点アルファと同じになる。そのマテリアルを使う頂点アルファなしのメッシュにも
-  u = 1 の UV を書く（primvar がないときの扱いに頼らない）。`primvars:displayOpacity`（COLOR_0.a × factor.a）も記録として書く。
+  u = 1 の UV を書く（primvar がないときの扱いに頼らない）。MASK は、Quick Look がしきい値を超えた部分も中途半端な不透明度で描くため、
+  cutoff / factor.a の位置で 0 から 1 に切り替わる階段のランプにして、残る部分を完全に不透明にする。`primvars:displayOpacity`（COLOR_0.a × factor.a）も記録として書く。
   UsdPreviewSurface は 2 つのテクスチャを掛け合わせられないので、ベースカラーテクスチャがあるときはそのアルファを使い、
   頂点アルファは反映しない（警告）。頂点カラーの RGB は従来どおりマテリアルには反映しない（上の「未対応」）。
 ## ロードマップ
