@@ -6,6 +6,78 @@ const PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8
 
 /** @returns {Uint8Array} GLB bytes */
 export function buildCubeGlb() {
+  const { bin, views } = cubeBin();
+  return packGlb({
+    asset: { version: "2.0", generator: "test" },
+    scene: 0,
+    scenes: [{ nodes: [0] }],
+    nodes: [
+      { name: "Cube Root", mesh: 0, children: [1] },
+      { name: "child-1", mesh: 0, translation: [2, 0, 0], rotation: [0, 0.7071068, 0, 0.7071068], scale: [0.5, 0.5, 0.5] },
+    ],
+    meshes: [{ name: "Cube", primitives: [{ attributes: { POSITION: 0, NORMAL: 1, TEXCOORD_0: 2 }, indices: 3, material: 0 }] }],
+    accessors: CUBE_ACCESSORS,
+    bufferViews: views,
+    buffers: [{ byteLength: bin.length }],
+    images: [{ bufferView: 4, mimeType: "image/png", name: "red" }],
+    textures: [{ source: 0 }],
+    materials: [{ name: "Red Mat", pbrMetallicRoughness: { baseColorTexture: { index: 0 }, metallicFactor: 0, roughnessFactor: 0.8 } }],
+  }, bin);
+}
+
+/**
+ * Stage 2 feature cases on top of the cube geometry:
+ *  - two images with the same name ("tex") → distinct file names in the USDZ
+ *  - a sampler with CLAMP_TO_EDGE / MIRRORED_REPEAT → wrapS / wrapT
+ *  - an unsupported extension and a LINES primitive → options.onWarning
+ * @returns {Uint8Array} GLB bytes
+ */
+export function buildFeatureGlb() {
+  const { bin, views } = cubeBin();
+  return packGlb({
+    asset: { version: "2.0", generator: "test-features" },
+    extensionsUsed: ["KHR_materials_unlit"],
+    scene: 0,
+    scenes: [{ nodes: [0, 1] }],
+    nodes: [
+      { name: "Clamped", mesh: 0 },
+      { name: "Unlit", mesh: 1, translation: [1.5, 0, 0] },
+    ],
+    meshes: [
+      { name: "CubeA", primitives: [{ attributes: { POSITION: 0, NORMAL: 1, TEXCOORD_0: 2 }, indices: 3, material: 0 }] },
+      {
+        name: "CubeB",
+        primitives: [
+          { attributes: { POSITION: 0, NORMAL: 1, TEXCOORD_0: 2 }, indices: 3, material: 1 },
+          { attributes: { POSITION: 0 }, mode: 1 },
+        ],
+      },
+    ],
+    accessors: CUBE_ACCESSORS,
+    bufferViews: views,
+    buffers: [{ byteLength: bin.length }],
+    images: [
+      { bufferView: 4, mimeType: "image/png", name: "tex" },
+      { bufferView: 4, mimeType: "image/png", name: "tex" },
+    ],
+    samplers: [{ wrapS: 33071, wrapT: 33648 }],
+    textures: [{ source: 0, sampler: 0 }, { source: 1 }],
+    materials: [
+      { name: "A", pbrMetallicRoughness: { baseColorTexture: { index: 0 } } },
+      { name: "B", pbrMetallicRoughness: { baseColorTexture: { index: 1 } }, extensions: { KHR_materials_unlit: {} } },
+    ],
+  }, bin);
+}
+
+const CUBE_ACCESSORS = [
+  { bufferView: 0, componentType: 5126, count: 24, type: "VEC3", min: [-0.5, -0.5, -0.5], max: [0.5, 0.5, 0.5] },
+  { bufferView: 1, componentType: 5126, count: 24, type: "VEC3" },
+  { bufferView: 2, componentType: 5126, count: 24, type: "VEC2" },
+  { bufferView: 3, componentType: 5123, count: 36, type: "SCALAR" },
+];
+
+/** Cube positions / normals / uvs / indices + a 1x1 PNG as bufferViews 0..4. */
+function cubeBin() {
   const png = base64ToBytes(PNG_BASE64);
 
   const P = [];
@@ -40,30 +112,10 @@ export function buildCubeGlb() {
     views.push({ buffer: 0, byteOffset: off, byteLength: p.length });
     off += p.length;
   }
-  const bin = concat(parts);
+  return { bin: concat(parts), views };
+}
 
-  const json = {
-    asset: { version: "2.0", generator: "test" },
-    scene: 0,
-    scenes: [{ nodes: [0] }],
-    nodes: [
-      { name: "Cube Root", mesh: 0, children: [1] },
-      { name: "child-1", mesh: 0, translation: [2, 0, 0], rotation: [0, 0.7071068, 0, 0.7071068], scale: [0.5, 0.5, 0.5] },
-    ],
-    meshes: [{ name: "Cube", primitives: [{ attributes: { POSITION: 0, NORMAL: 1, TEXCOORD_0: 2 }, indices: 3, material: 0 }] }],
-    accessors: [
-      { bufferView: 0, componentType: 5126, count: 24, type: "VEC3", min: [-0.5, -0.5, -0.5], max: [0.5, 0.5, 0.5] },
-      { bufferView: 1, componentType: 5126, count: 24, type: "VEC3" },
-      { bufferView: 2, componentType: 5126, count: 24, type: "VEC2" },
-      { bufferView: 3, componentType: 5123, count: 36, type: "SCALAR" },
-    ],
-    bufferViews: views,
-    buffers: [{ byteLength: bin.length }],
-    images: [{ bufferView: 4, mimeType: "image/png", name: "red" }],
-    textures: [{ source: 0 }],
-    materials: [{ name: "Red Mat", pbrMetallicRoughness: { baseColorTexture: { index: 0 }, metallicFactor: 0, roughnessFactor: 0.8 } }],
-  };
-
+function packGlb(json, bin) {
   const jsonBytes = new TextEncoder().encode(JSON.stringify(json));
   const jsonChunk = new Uint8Array(jsonBytes.length + ((4 - (jsonBytes.length % 4)) % 4)).fill(0x20);
   jsonChunk.set(jsonBytes);

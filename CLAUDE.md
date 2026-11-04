@@ -8,7 +8,7 @@ Node 固有 API（`fs`, `Buffer`）は `cli.js` と `test/` の中だけで使�
 
 npm パッケージ名: `gltf2usd-js`。
 
-## 現在の状態（段階 1 完了）
+## 現在の状態（段階 1 完了、段階 2 進行中）
 
 `src/` 4 ファイル、合計 ~600 行。テスト GLB（テクスチャ付きキューブ + TRS 付き子ノード）を
 OpenUSD 26.11 の全 30 バリデータに通して error 0 を確認済み。
@@ -20,7 +20,7 @@ OpenUSD 26.11 の全 30 バリデータに通して error 0 を確認済み。
 | `src/usdz.js` | `packUsdz(entries)` → `Uint8Array` | stored-only zip、64 バイトアライン、CRC32 自前 |
 | `src/index.js`| `glbToUsda()`, `glbToUsdz()` | 公開 API |
 | `cli.js`      | `node cli.js in.glb out.usdz\|out.usda` | |
-| `test/cube-glb.js` | テスト用 GLB をメモリ上で生成（Node / ブラウザ共用） | |
+| `test/cube-glb.js` | テスト用 GLB をメモリ上で生成（Node / ブラウザ共用） | `buildCubeGlb()`（段階 1）、`buildFeatureGlb()`（段階 2 の機能） |
 | `test/make-glb.js` | `test/cube.glb` を書き出す | |
 | `test/run.js` | JS 側の単体テスト（prim 名、zip アライン検証） | `npm test` |
 | `test/validate.py` | OpenUSD で開いてバリデータ実行 | `pip install usd-core` が必要 |
@@ -45,12 +45,15 @@ OpenUSD 26.11 の全 30 バリデータに通して error 0 を確認済み。
 - POSITION / NORMAL / TEXCOORD_0（V 反転）/ COLOR_0（`primvars:displayColor`）
 - `extent`、`prepend apiSchemas = ["MaterialBindingAPI"]`、`doubleSided`
 - マテリアル: baseColor factor/texture、metallicRoughness、normal、occlusion、emissive、alphaMode BLEND/MASK
-- テクスチャ（PNG / JPEG）の USDZ 同梱（`textures/<name>.<ext>`）
+- テクスチャ（PNG / JPEG）の USDZ 同梱（`textures/<name>.<ext>`、同名は `<name>_1.<ext>`）
+- sampler の wrapS / wrapT
+- `options.onWarning`: 未対応拡張、POINTS / LINES、POSITION なし、アニメーション / スキン / カメラ / モーフ、複数シーン、
+  解決できない画像、PNG / JPEG 以外の画像、TEXCOORD_1 以降を参照するテクスチャ
 
 ### 未対応（既知）
 - ノード間で共有されるメッシュは複製している（instancing なし）
 - TEXCOORD_1、KHR_texture_transform、KHR_materials_*、KHR_mesh_quantization（normalized は読めるので一部は動く）
-- POINTS / LINES プリミティブ（スキップ）
+- POINTS / LINES プリミティブ（スキップして警告）
 - アニメーション、スキン、モーフターゲット、カメラ、ライト
 - 外部ファイル参照の `.gltf`（`uri` が data: 以外だと throw）
 - USDC（Crate）出力
@@ -85,6 +88,7 @@ npm test                                   # GLB 生成 + JS テスト
 node cli.js test/cube.glb /tmp/cube.usdz
 pip install usd-core --break-system-packages   # 初回のみ
 python3 test/validate.py /tmp/cube.usdz    # "0 validation error(s)" を確認
+node cli.js test/features.glb /tmp/features.usdz && python3 test/validate.py /tmp/features.usdz
 npm run demo                               # 見た目の確認: サンプルと fixtures の GLB を左右で比較
 ```
 
@@ -100,9 +104,10 @@ npm run demo                               # 見た目の確認: サンプルと
 - [ ] TEXCOORD_1 → `primvars:st1`、`texCoord` フィールドを見てテクスチャごとに `uvReader_st1` を使う
 - [ ] KHR_texture_transform → `UsdTransform2d` シェーダを `uvReader` と `UsdUVTexture` の間に挟む
 - [ ] KHR_materials_emissive_strength / ior / clearcoat / transmission（UsdPreviewSurface に対応する入力があるもののみ）
-- [ ] sampler の wrapS/wrapT（REPEAT / CLAMP_TO_EDGE / MIRRORED_REPEAT → `repeat` / `clamp` / `mirror`）
+- [x] sampler の wrapS/wrapT（REPEAT / CLAMP_TO_EDGE / MIRRORED_REPEAT → `repeat` / `clamp` / `mirror`）
 - [ ] 外部 `.gltf` 入力（Node なら隣接ファイル、ブラウザなら `File[]` を受け取る resolver を注入）
-- [ ] 画像名の衝突回避（同名画像が複数ある場合）
+- [x] 画像名の衝突回避（同名画像が複数ある場合）。大文字小文字を区別せずに比較
+- [x] `options.onWarning`（`ctx.warn()`、同じ文言は 1 回だけ）。対応した拡張は `SUPPORTED_EXTENSIONS` に追加すること
 
 ### 段階 3: アニメーション
 - [ ] `timeSamples` で `xformOp:translate` / `xformOp:orient` / `xformOp:scale` を別々に出す
@@ -127,6 +132,6 @@ npm run demo                               # 見た目の確認: サンプルと
 - ESM、セミコロンあり、ダブルクォート、2 スペースインデント
 - `src/` に外部依存を追加しない。どうしても必要なら理由を README に書く
 - 新機能は `test/cube-glb.js` にケースを足すか `test/fixtures/` のサンプルで検証し、`validate.py` で error 0 を保つ
-- 変換で捨てた情報（未対応拡張など）は `console.warn` ではなく `options.onWarning?.(msg)` 経由で通知する（未実装、段階 2 で追加）
+- 変換で捨てた情報（未対応拡張など）は `console.warn` ではなく `ctx.warn(msg)`（= `options.onWarning`）で通知する
 - OpenUSD のコードを移植・翻訳した場合は、そのファイルに Pixar の著作権表示を残し、リポジトリに `THIRD_PARTY_NOTICES.md` を追加する
 - 「OpenUSD」「Pixar」を名乗らない・公式と誤認させない

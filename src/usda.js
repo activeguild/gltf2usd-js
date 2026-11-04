@@ -6,9 +6,17 @@
 //   /Root/Scene/<Node>/...    (Xform hierarchy; one Mesh prim per glTF primitive)
 //   /Root/Materials/<Mat>     (Material + UsdPreviewSurface + UsdUVTexture shaders)
 
+const MODE_NAMES = ["POINTS", "LINES", "LINE_LOOP", "LINE_STRIP", "TRIANGLES", "TRIANGLE_STRIP", "TRIANGLE_FAN"];
 const MODE_TRIANGLES = 4;
 const MODE_TRIANGLE_STRIP = 5;
 const MODE_TRIANGLE_FAN = 6;
+
+// glTF sampler wrap modes → UsdUVTexture wrapS / wrapT tokens.
+const WRAP_MODES = { 33071: "clamp", 33648: "mirror", 10497: "repeat" };
+
+// glTF extensions whose data the converter uses. Anything else in
+// extensionsUsed is reported through options.onWarning.
+const SUPPORTED_EXTENSIONS = new Set();
 
 export function gltfToUsda(asset, options = {}) {
   const texturePrefix = options.texturePrefix ?? "textures/";
@@ -18,7 +26,10 @@ export function gltfToUsda(asset, options = {}) {
     texturePrefix,
     files: [],            // extra files to package: { name, bytes }
     imageNames: new Map(), // image index -> file name
+    usedFileNames: new Set(),
+    warn: makeWarn(options.onWarning),
   };
+  reportUnsupported(ctx);
 
   const lines = [];
   lines.push("#usda 1.0");
@@ -54,6 +65,35 @@ export function gltfToUsda(asset, options = {}) {
   lines.push("}");
   lines.push("");
   return { usda: lines.join("\n"), files: ctx.files };
+}
+
+// ---------- Warnings ----------
+
+/** Deduplicated warning sink; a no-op when the caller passes no onWarning. */
+function makeWarn(onWarning) {
+  const seen = new Set();
+  return (msg) => {
+    if (typeof onWarning !== "function" || seen.has(msg)) return;
+    seen.add(msg);
+    onWarning(msg);
+  };
+}
+
+/** Report document-level features that the converter drops. */
+function reportUnsupported(ctx) {
+  const { json, warn } = ctx;
+  for (const ext of json.extensionsUsed || []) {
+    if (SUPPORTED_EXTENSIONS.has(ext)) continue;
+    const required = (json.extensionsRequired || []).includes(ext);
+    warn(`Extension ${ext}${required ? " (required)" : ""} is not supported; its data is ignored`);
+  }
+  if ((json.scenes?.length ?? 0) > 1) warn(`glTF has ${json.scenes.length} scenes; only scene ${json.scene ?? 0} is converted`);
+  if (json.animations?.length) warn(`${json.animations.length} animation(s) are not supported yet and were skipped`);
+  if (json.skins?.length) warn(`${json.skins.length} skin(s) are not supported yet; meshes are written in bind pose`);
+  if (json.cameras?.length) warn(`${json.cameras.length} camera(s) are not supported yet and were skipped`);
+  if ((json.meshes || []).some((m) => (m.primitives || []).some((p) => p.targets?.length))) {
+    warn("Morph targets are not supported yet; base shapes are written");
+  }
 }
 
 // ---------- Nodes ----------
@@ -120,11 +160,15 @@ function composeTRS([tx, ty, tz], [x, y, z, w], [sx, sy, sz]) {
 function writeMeshPrim(ctx, lines, prim, name, depth) {
   const mode = prim.mode ?? MODE_TRIANGLES;
   if (mode !== MODE_TRIANGLES && mode !== MODE_TRIANGLE_STRIP && mode !== MODE_TRIANGLE_FAN) {
-    return; // points/lines not supported in this step
+    ctx.warn(`Primitive mode ${MODE_NAMES[mode] ?? mode} is not supported; skipped (mesh "${name}")`);
+    return;
   }
   const ind = "    ".repeat(depth);
   const attrs = prim.attributes || {};
-  if (attrs.POSITION === undefined) return;
+  if (attrs.POSITION === undefined) {
+    ctx.warn(`Primitive without POSITION skipped (mesh "${name}")`);
+    return;
+  }
 
   const pos = ctx.asset.accessor(attrs.POSITION);
   const indices = buildTriangleIndices(ctx, prim, mode, pos.count);
@@ -240,7 +284,7 @@ function writeMaterial(ctx, lines, mat, index, depth) {
   // Base color
   const bcTex = textureFile(ctx, pbr.baseColorTexture);
   if (bcTex) {
-    textures.push({ shader: "Texture_baseColor", file: bcTex, colorSpace: "sRGB", scale: baseColor });
+    textures.push({ shader: "Texture_baseColor", ...bcTex, colorSpace: "sRGB", scale: baseColor });
     lines.push(`${ind}        color3f inputs:diffuseColor.connect = <${path}/Texture_baseColor.outputs:rgb>`);
     if (alphaMode !== "OPAQUE") {
       lines.push(`${ind}        float inputs:opacity.connect = <${path}/Texture_baseColor.outputs:a>`);
@@ -256,7 +300,7 @@ function writeMaterial(ctx, lines, mat, index, depth) {
   // Metallic / roughness (glTF packs: G = roughness, B = metallic)
   const mrTex = textureFile(ctx, pbr.metallicRoughnessTexture);
   if (mrTex) {
-    textures.push({ shader: "Texture_metallicRoughness", file: mrTex, colorSpace: "raw", scale: [1, roughness, metallic, 1] });
+    textures.push({ shader: "Texture_metallicRoughness", ...mrTex, colorSpace: "raw", scale: [1, roughness, metallic, 1] });
     lines.push(`${ind}        float inputs:roughness.connect = <${path}/Texture_metallicRoughness.outputs:g>`);
     lines.push(`${ind}        float inputs:metallic.connect = <${path}/Texture_metallicRoughness.outputs:b>`);
   } else {
@@ -267,21 +311,21 @@ function writeMaterial(ctx, lines, mat, index, depth) {
   // Normal map
   const nTex = textureFile(ctx, mat.normalTexture);
   if (nTex) {
-    textures.push({ shader: "Texture_normal", file: nTex, colorSpace: "raw", scale: [2, 2, 2, 1], bias: [-1, -1, -1, 0] });
+    textures.push({ shader: "Texture_normal", ...nTex, colorSpace: "raw", scale: [2, 2, 2, 1], bias: [-1, -1, -1, 0] });
     lines.push(`${ind}        normal3f inputs:normal.connect = <${path}/Texture_normal.outputs:rgb>`);
   }
 
   // Occlusion (R channel)
   const oTex = textureFile(ctx, mat.occlusionTexture);
   if (oTex) {
-    textures.push({ shader: "Texture_occlusion", file: oTex, colorSpace: "raw" });
+    textures.push({ shader: "Texture_occlusion", ...oTex, colorSpace: "raw" });
     lines.push(`${ind}        float inputs:occlusion.connect = <${path}/Texture_occlusion.outputs:r>`);
   }
 
   // Emissive
   const eTex = textureFile(ctx, mat.emissiveTexture);
   if (eTex) {
-    textures.push({ shader: "Texture_emissive", file: eTex, colorSpace: "sRGB", scale: [...emissive, 1] });
+    textures.push({ shader: "Texture_emissive", ...eTex, colorSpace: "sRGB", scale: [...emissive, 1] });
     lines.push(`${ind}        color3f inputs:emissiveColor.connect = <${path}/Texture_emissive.outputs:rgb>`);
   } else if (emissive.some((v) => v !== 0)) {
     lines.push(`${ind}        color3f inputs:emissiveColor = ${fmtTuple(emissive)}`);
@@ -306,8 +350,8 @@ function writeMaterial(ctx, lines, mat, index, depth) {
       lines.push(`${ind}        asset inputs:file = @${t.file}@`);
       lines.push(`${ind}        float2 inputs:st.connect = <${path}/uvReader_st.outputs:result>`);
       lines.push(`${ind}        token inputs:sourceColorSpace = "${t.colorSpace}"`);
-      lines.push(`${ind}        token inputs:wrapS = "repeat"`);
-      lines.push(`${ind}        token inputs:wrapT = "repeat"`);
+      lines.push(`${ind}        token inputs:wrapS = "${t.wrapS}"`);
+      lines.push(`${ind}        token inputs:wrapT = "${t.wrapT}"`);
       if (t.scale) lines.push(`${ind}        float4 inputs:scale = ${fmtTuple(t.scale)}`);
       if (t.bias) lines.push(`${ind}        float4 inputs:bias = ${fmtTuple(t.bias)}`);
       lines.push(`${ind}        float outputs:r`);
@@ -322,19 +366,60 @@ function writeMaterial(ctx, lines, mat, index, depth) {
   lines.push(`${ind}}`);
 }
 
-/** Resolve a glTF textureInfo to a packaged file name, registering the image bytes. */
+/**
+ * Resolve a glTF textureInfo to { file, wrapS, wrapT }, registering the image
+ * bytes for packaging. Returns null (with a warning) when it can't be used.
+ */
 function textureFile(ctx, texInfo) {
   if (!texInfo) return null;
   const tex = ctx.json.textures?.[texInfo.index];
-  if (!tex || tex.source === undefined) return null;
-  const imgIndex = tex.source;
+  if (!tex) {
+    ctx.warn(`Texture ${texInfo.index} does not exist; ignored`);
+    return null;
+  }
+  if (tex.source === undefined) {
+    ctx.warn(`Texture ${texInfo.index} has no PNG/JPEG source (image extensions are not supported); ignored`);
+    return null;
+  }
+  if ((texInfo.texCoord ?? 0) !== 0) {
+    ctx.warn(`TEXCOORD_${texInfo.texCoord} is not supported yet; texture ${texInfo.index} uses TEXCOORD_0`);
+  }
+  const file = imageFile(ctx, tex.source);
+  if (!file) return null;
+  const sampler = tex.sampler !== undefined ? ctx.json.samplers?.[tex.sampler] ?? {} : {};
+  return { file, wrapS: wrapMode(ctx, sampler.wrapS), wrapT: wrapMode(ctx, sampler.wrapT) };
+}
+
+function wrapMode(ctx, glMode) {
+  if (glMode === undefined) return "repeat";
+  const mode = WRAP_MODES[glMode];
+  if (!mode) ctx.warn(`Unknown sampler wrap mode ${glMode}; using repeat`);
+  return mode ?? "repeat";
+}
+
+/** Package an image once and return its file name inside the USDZ. */
+function imageFile(ctx, imgIndex) {
   if (ctx.imageNames.has(imgIndex)) return ctx.imageNames.get(imgIndex);
-  const img = ctx.asset.imageBytes(imgIndex);
-  if (!img) return null;
-  const ext = img.mimeType === "image/jpeg" ? "jpg" : img.mimeType === "image/png" ? "png" : "bin";
-  const fileName = `${ctx.texturePrefix}${sanitize(ctx.json.images[imgIndex].name, `image_${imgIndex}`)}.${ext}`;
+  const image = ctx.json.images?.[imgIndex];
+  const img = image && ctx.asset.imageBytes(imgIndex);
+  let fileName = null;
+  if (!img) {
+    ctx.warn(`Image ${imgIndex} could not be resolved${image?.uri ? ` (uri: ${image.uri.slice(0, 64)})` : ""}; texture ignored`);
+  } else if (img.mimeType !== "image/png" && img.mimeType !== "image/jpeg") {
+    ctx.warn(`Image ${imgIndex} has unsupported type ${img.mimeType ?? "(unknown)"}; USDZ allows PNG and JPEG only`);
+  } else {
+    const ext = img.mimeType === "image/jpeg" ? "jpg" : "png";
+    const base = sanitize(image.name, `image_${imgIndex}`);
+    let candidate = `${ctx.texturePrefix}${base}.${ext}`;
+    for (let i = 1; ctx.usedFileNames.has(candidate.toLowerCase()); i++) {
+      candidate = `${ctx.texturePrefix}${base}_${i}.${ext}`;
+    }
+    // Compare case-insensitively: archives are often extracted on case-insensitive file systems.
+    ctx.usedFileNames.add(candidate.toLowerCase());
+    fileName = candidate;
+    ctx.files.push({ name: fileName, bytes: img.bytes });
+  }
   ctx.imageNames.set(imgIndex, fileName);
-  ctx.files.push({ name: fileName, bytes: img.bytes });
   return fileName;
 }
 

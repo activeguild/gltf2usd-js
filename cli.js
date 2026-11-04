@@ -8,9 +8,10 @@ if (!input || !output) {
   process.exit(1);
 }
 const glb = readFileSync(input);
+const options = { onWarning: (msg) => console.warn(`warning: ${msg}`) };
 if (output.endsWith(".usda")) {
-  writeFileSync(output, glbToUsda(glb).usda);
+  writeFileSync(output, glbToUsda(glb, options).usda);
 } else {
-  writeFileSync(output, glbToUsdz(glb));
+  writeFileSync(output, glbToUsdz(glb, options));
 }
 console.log(`wrote ${output}`);

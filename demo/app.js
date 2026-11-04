@@ -4,7 +4,7 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 
 import { glbToUsdz } from "../src/index.js";
-import { buildCubeGlb } from "../test/cube-glb.js";
+import { buildCubeGlb, buildFeatureGlb } from "../test/cube-glb.js";
 import { readUsdz } from "./usdz-reader.js";
 import { parseUsda, traverse } from "./usda-parser.js";
 import { runChecks } from "./checks.js";
@@ -114,6 +114,7 @@ $("file").addEventListener("change", (e) => {
   if (f) loadFile(f);
 });
 $("sample").addEventListener("click", () => run(buildCubeGlb(), "sample-cube.glb"));
+$("sample-features").addEventListener("click", () => run(buildFeatureGlb(), "sample-features.glb"));
 
 let dragDepth = 0;
 addEventListener("dragenter", (e) => { e.preventDefault(); dragDepth++; document.body.classList.add("dragging"); });

@@ -5,7 +5,12 @@ import { packUsdz } from "./usdz.js";
 
 export { parseGLB, GltfAsset, gltfToUsda, packUsdz };
 
-/** GLB (ArrayBuffer | Uint8Array) → { usda: string, files: {name, bytes}[] } */
+/**
+ * GLB (ArrayBuffer | Uint8Array) → { usda: string, files: {name, bytes}[] }
+ * options.onWarning(msg): called once per kind of glTF data that was dropped
+ *   (unsupported extensions, primitive modes, animations, unresolvable images, ...).
+ * options.texturePrefix: folder for packaged textures (default "textures/").
+ */
 export function glbToUsda(input, options = {}) {
   const asset = new GltfAsset(parseGLB(toArrayBuffer(input)));
   return gltfToUsda(asset, options);
