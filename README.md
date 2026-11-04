@@ -101,7 +101,7 @@ GLB を選ぶかドロップすると（またはサンプルボタンで）、�
 - KHR_materials_emissive_strength / ior / clearcoat（transmission などは未対応で警告）
 - KHR_mesh_quantization、KHR_materials_unlit（黒 diffuse + 発光で近似）
 - EXT_mesh_gpu_instancing（インスタンスごとの instanceable reference に展開。TRANSLATION / ROTATION / SCALE を使い、
-  `_ID` / `_COLOR` などの独自属性は検証したうえで USD には書かず、ノードと属性ごとに 1 回警告する）
+  `_ID` / `_COLOR` などの独自属性（名前は `_` で始まり、UNSIGNED_INT は不可）は検証したうえで USD には書かず、ノードと属性ごとに 1 回警告する）
 - KHR_materials_variants → variantSet（`default` + 各バリアント）
 - KHR_lights_punctual → UsdLux（DistantLight / SphereLight / ShapingAPI。強さは近似）
 - EXT_meshopt_compression（依存ゼロの自前デコーダ）

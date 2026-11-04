@@ -219,6 +219,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
    ROTATION は VEC4。componentType は FLOAT（ROTATION は拡張の仕様どおり normalized BYTE / SHORT も可、TRANSLATION / SCALE は
    KHR_mesh_quantization が宣言されていれば整数も可）。全属性の count は同じ（`gpuInstanceCount()` の `Math.min()` による切り詰めは廃止し、
    検証をすり抜けた不一致はエラー）。インスタンス属性の accessor の byteOffset は 4 の倍数（byteStride 付きの bufferView は可）。
+   独自属性は名前が `_` で始まり UNSIGNED_INT でないこと（§ 3.7.2.1。それ以外の名前・型はエラー）。
    独自属性（`_ID` / `_COLOR` など）は参照・count・アライメントを検証したうえで USD には書かず、`warnCustomInstanceAttributes()` が
    ノードと属性ごとに 1 回警告する（インスタンス数は全属性共通の count のまま。独自属性だけならその count で恒等変換のインスタンス）。
    JSON の型: トップレベル配列の要素・primitive・target・sampler・channel はオブジェクト、children / scene.nodes / samplers / channels /

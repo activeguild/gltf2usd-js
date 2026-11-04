@@ -349,7 +349,15 @@ export function validateDocument(json, limits) {
       let instances, first;
       for (const [name, a] of Object.entries(attrs)) {
         ref(a, accessors, `${name} accessor`, iw);
-        checkAttribute(INSTANCE_RULES, name, accessors[a], `${iw}: ${name} (accessor ${a})`, quantization, fail);
+        const label = `${iw}: ${name} (accessor ${a})`;
+        if (INSTANCE_RULES.some((r) => r.re.test(name))) {
+          checkAttribute(INSTANCE_RULES, name, accessors[a], label, quantization, fail);
+        } else {
+          // Application-specific attributes (glTF 2.0 § 3.7.2.1, which the extension follows):
+          // names start with "_", and UNSIGNED_INT is not allowed.
+          if (!name.startsWith("_")) fail(`${iw}: attribute "${name}" is not TRANSLATION / ROTATION / SCALE; custom attributes must start with "_"`);
+          if (accessors[a].componentType === 5125) fail(`${label} is UNSIGNED_INT, which custom attributes must not use`);
+        }
         instanceUse.add(a);
         if (instances === undefined) { instances = accessors[a].count; first = name; }
         if (accessors[a].count !== instances) fail(`${iw}: ${name} (accessor ${a}) has ${accessors[a].count} instances, ${first} has ${instances} (all attributes must have the same count)`);

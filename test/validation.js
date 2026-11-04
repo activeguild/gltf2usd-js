@@ -484,6 +484,28 @@ rejects(withJson((j) => { j.meshes[0].primitives.push({ attributes: {} }); }), /
     assert(animated.w.some((x) => /Node 0: EXT_mesh_gpu_instancing under an animated node is drawn once/.test(x)) && custom(animated.w).length === 1, `animated instanced node: ${animated.w}`);
     // Without custom attributes there is no such warning.
     assert(!custom(run(instanced({ TRANSLATION: z("VEC3", 2), ROTATION: z("VEC4", 2), SCALE: z("VEC3", 2) })).w).length, "no warning for TRS only");
+    // Custom attribute names and component types (glTF 2.0 § 3.7.2.1).
+    for (const [label, acc] of [
+      ["_ID FLOAT SCALAR", z("SCALAR", 2)],
+      ["_ID UNSIGNED_BYTE", z("SCALAR", 2, 5121)],
+      ["_ID UNSIGNED_SHORT", z("SCALAR", 2, 5123)],
+      ["_ID normalized UNSIGNED_SHORT", z("SCALAR", 2, 5123, { normalized: true })],
+    ]) {
+      const r = run(instanced({ TRANSLATION: z("VEC3", 2), _ID: acc }));
+      assert(instances(r.usda) === 2 && custom(r.w).length === 1, `${label}: accepted, 2 instances, 1 warning`);
+    }
+    {
+      const r = run(instanced({ TRANSLATION: z("VEC3", 2), _COLOR: z("VEC3", 2) }));
+      assert(instances(r.usda) === 2 && custom(r.w).length === 1 && custom(r.w)[0].includes('"_COLOR"'), "_COLOR FLOAT VEC3 accepted");
+      assert(r.usda === run(instanced({ TRANSLATION: z("VEC3", 2) })).usda, "_COLOR leaves the USD unchanged");
+    }
+    rejects(instanced({ TRANSLATION: z("VEC3", 2), _ID: z("SCALAR", 2, 5125) }), new RegExp(`${W}: _ID \\(accessor 3\\) is UNSIGNED_INT, which custom attributes must not use`), "_ID UNSIGNED_INT");
+    rejects(instanced({ _ID: z("SCALAR", 2, 5125) }), /_ID \(accessor 2\) is UNSIGNED_INT/, "_ID UNSIGNED_INT alone");
+    rejects(instanced({ TRANSLATION: z("VEC3", 2), ID: z("SCALAR", 2) }), new RegExp(`${W}: attribute "ID" is not TRANSLATION / ROTATION / SCALE; custom attributes must start with "_"`), "custom attribute without underscore");
+    rejects(instanced({ translation: z("VEC3", 2) }), /attribute "translation" is not TRANSLATION \/ ROTATION \/ SCALE/, "lower-case standard name");
+    rejects(instanced({ COLOR_0: z("VEC4", 2) }), /attribute "COLOR_0" is not TRANSLATION/, "mesh attribute name on instancing");
+    // The standard attributes keep their own rules (UNSIGNED_INT SCALE was already rejected as a type error).
+    rejects(instanced({ SCALE: z("VEC3", 2, 5125) }), /SCALE \(accessor 2\) is UNSIGNED_INT; allowed: FLOAT/, "standard SCALE rule unchanged");
     // Custom attributes keep the reference / count / alignment checks.
     rejects(instanced({ TRANSLATION: z("VEC3", 2), _ID: 9 }), new RegExp(`${W}: _ID accessor 9 does not exist`), "custom attribute with an invalid accessor");
     rejects(instanced({ TRANSLATION: z("VEC3", 2), _ID: z("SCALAR", 3) }), /_ID \(accessor 3\) has 3 instances, TRANSLATION has 2/, "custom attribute count mismatch");
