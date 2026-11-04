@@ -136,12 +136,14 @@ GLB を選ぶかドロップすると（またはサンプルボタンで）、�
   警告してスキップ、同じ時刻のキーは最後のものを残す（USD は 1 時刻に 1 値）。リソース上限の既定値（`DEFAULT_LIMITS`）は
   メモリとスタックを守るためだけのもので、Khronos のサンプルや一般的な AR 用モデルよりずっと大きい。
 - **頂点アルファ**: glTF ではアルファ = baseColorFactor.a × テクスチャ.a × COLOR_0.a で、使われるのは alphaMode が BLEND / MASK の
-  ときだけ（OPAQUE と既定マテリアルでは無視）。UsdPreviewSurface は `displayOpacity` を自動では使わないので、頂点アルファ付きで
-  使われる BLEND / MASK マテリアルは `inputs:opacity` を `UsdPrimvarReader_float`（`displayOpacity`、fallback = factor.a）から取り、
-  メッシュの `displayOpacity` は COLOR_0.a × factor.a にする（頂点アルファのないメッシュは fallback で factor.a のまま）。
-  UsdPreviewSurface は 2 つの入力を掛け合わせられないので、baseColorTexture があるときはテクスチャのアルファを使い、
+  ときだけ（OPAQUE と既定マテリアルでは無視）。Quick Look / AR Quick Look は、`inputs:opacity` を `UsdPrimvarReader_float`
+  （`displayOpacity` など）から取るマテリアルを完全に透明に描く（実機で確認）一方、UV の primvar で読むテクスチャは描ける。
+  そこで、頂点アルファ付きで使われる BLEND / MASK マテリアル（ベースカラーテクスチャなし）は、opacity を 256 × 1 のアルファの
+  ランプ画像（`textures/vertex_alpha_ramp.png`、× factor.a）から取り、メッシュには u = COLOR_0.a の UV（`primvars:vertexAlphaUV`）を書く。
+  UV は頂点カラーと同じく面内で線形補間されるので、見た目は頂点アルファと同じになる。そのマテリアルを使う頂点アルファなしのメッシュにも
+  u = 1 の UV を書く（primvar がないときの扱いに頼らない）。`primvars:displayOpacity`（COLOR_0.a × factor.a）も記録として書く。
+  UsdPreviewSurface は 2 つのテクスチャを掛け合わせられないので、ベースカラーテクスチャがあるときはそのアルファを使い、
   頂点アルファは反映しない（警告）。頂点カラーの RGB は従来どおりマテリアルには反映しない（上の「未対応」）。
-
 ## ロードマップ
 
 1. ~~GLB パーサ + USDA + USDZ~~ ✅

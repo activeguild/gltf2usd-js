@@ -74,28 +74,67 @@ const RGB = [1, 0, 0, 0, 1, 0, 0, 0, 1];
   assert(!usda.includes("displayOpacity") && !usda.includes("inputs:opacity"), "OPAQUE material ignores vertex alpha");
 }
 
-// VEC4 + BLEND: displayOpacity = alpha × factor.a, material opacity reads it (fallback = factor.a).
+// u of the ramp texel center for alpha a (see rampU in src/convert.js), as USDA prints it.
+const u = (a) => Number(((0.5 + a * 255) / 256).toPrecision(7));
+const uvLine = (alphas) => `[${alphas.map((a) => `(${u(a)}, 0.5)`).join(", ")}]`;
+
+// VEC4 + BLEND: displayOpacity = alpha × factor.a; the material's opacity comes from the
+// alpha ramp texture (× factor.a), read through primvars:vertexAlphaUV (u = alpha).
 for (const [factor, label] of [[1, "factor 1"], [0.5, "factor 0.5"]]) {
-  const { usda, warnings } = convert(colored({ colors: RGBA, material: { alphaMode: "BLEND", pbrMetallicRoughness: { baseColorFactor: [1, 1, 1, factor] } } }));
+  const { usda, files, warnings } = (() => {
+    const w = [];
+    const r = glbToUsda(colored({ colors: RGBA, material: { alphaMode: "BLEND", pbrMetallicRoughness: { baseColorFactor: [1, 1, 1, factor] } } }), { onWarning: (x) => w.push(x) });
+    return { ...r, warnings: w };
+  })();
   const want = [1, 0.5, 0].map((a) => a * factor).join(", ");
   assert(line(usda, "float[] primvars:displayOpacity").includes(`[${want}]`), `BLEND ${label}: displayOpacity ${line(usda, "displayOpacity")}`);
-  assert(usda.includes("float inputs:opacity.connect = </Root/Materials/M/displayOpacityReader.outputs:result>"), `BLEND ${label}: opacity connected`);
-  assert(usda.includes('uniform token info:id = "UsdPrimvarReader_float"') && usda.includes('string inputs:varname = "displayOpacity"'), `BLEND ${label}: reader`);
-  assert(line(usda, "inputs:fallback").includes(`= ${factor}`), `BLEND ${label}: fallback = factor alpha`);
+  assert(line(usda, "primvars:vertexAlphaUV").includes(uvLine([1, 0.5, 0])), `BLEND ${label}: vertexAlphaUV ${line(usda, "vertexAlphaUV")}`);
+  assert(usda.includes("float inputs:opacity.connect = </Root/Materials/M/Texture_vertexAlpha.outputs:a>"), `BLEND ${label}: opacity from the ramp`);
+  assert(usda.includes('string inputs:varname = "vertexAlphaUV"'), `BLEND ${label}: UV reader`);
+  const ramp = usda.slice(usda.indexOf('def Shader "Texture_vertexAlpha"'));
+  assert(ramp.includes("@textures/vertex_alpha_ramp.png@") && ramp.includes(`float4 inputs:scale = (1, 1, 1, ${factor})`) && ramp.includes('inputs:wrapS = "clamp"'), `BLEND ${label}: ramp texture`);
+  assert(files.some((f) => f.name === "textures/vertex_alpha_ramp.png"), `BLEND ${label}: ramp packaged`);
+  assert(!usda.includes("UsdPrimvarReader_float\""), `BLEND ${label}: no float primvar reader (Quick Look draws it transparent)`);
   assert(warnings.length === 0, `BLEND ${label} warnings: ${warnings}`);
+}
+
+// The ramp is a 256 × 1 gray + alpha PNG with alpha = x.
+{
+  const { files } = glbToUsda(colored({ colors: RGBA, material: { alphaMode: "BLEND" } }));
+  const png = files.find((f) => f.name.endsWith("vertex_alpha_ramp.png")).bytes;
+  const dv = new DataView(png.buffer, png.byteOffset);
+  assert(dv.getUint32(16) === 256 && dv.getUint32(20) === 1 && png[24] === 8 && png[25] === 4, "ramp is 256 × 1, 8-bit gray + alpha");
+  const idat = png.indexOf(0x49, 33); // "IDAT" type follows its length
+  const raw = png.subarray(idat + 4 + 2 + 5, idat + 4 + 2 + 5 + 513); // zlib header + stored block header
+  assert(raw[0] === 0 && raw[1 + 2 * 128] === 128 && raw[2 + 2 * 128] === 128 && raw[2 + 2 * 255] === 255, "ramp pixels: gray = alpha = x");
 }
 
 // VEC4 + MASK: same, plus the cutoff.
 {
   const { usda } = convert(colored({ colors: RGBA, material: { alphaMode: "MASK", alphaCutoff: 0.25 } }));
-  assert(usda.includes("displayOpacityReader.outputs:result") && line(usda, "opacityThreshold").includes("0.25"), "MASK: reader + threshold");
+  assert(usda.includes("Texture_vertexAlpha.outputs:a") && line(usda, "opacityThreshold").includes("0.25"), "MASK: ramp + threshold");
+}
+
+// A mesh without vertex alpha that shares the material gets alpha 1 in its ramp UVs.
+{
+  const glb = colored({ colors: RGBA, material: { alphaMode: "BLEND" } });
+  const dvj = new DataView(glb.buffer);
+  const jsonLen = dvj.getUint32(12, true);
+  const json = JSON.parse(new TextDecoder().decode(glb.subarray(20, 20 + jsonLen)));
+  json.meshes.push({ name: "Plain", primitives: [{ attributes: { POSITION: 0 }, material: 0 }] });
+  json.nodes.push({ mesh: 1 });
+  json.scenes[0].nodes.push(1);
+  const { usda } = convert(makeGlb(json, glb.subarray(28 + jsonLen)));
+  const plain = usda.slice(usda.indexOf('def Mesh "Plain"'));
+  assert(line(plain, "primvars:vertexAlphaUV").includes(uvLine([1, 1, 1])), `shared material, no COLOR_0: ${line(plain, "vertexAlphaUV")}`);
+  assert(!plain.slice(0, plain.indexOf("}")).includes("displayOpacity"), "no displayOpacity without COLOR_0");
 }
 
 // VEC4 + BLEND + baseColorTexture: texture alpha stays; vertex alpha cannot be multiplied in.
 {
   const { usda, warnings } = convert(colored({ colors: RGBA, material: { alphaMode: "BLEND" }, texture: true }));
   assert(usda.includes("float inputs:opacity.connect = </Root/Materials/M/Texture_baseColor.outputs:a>"), "texture alpha connected");
-  assert(!usda.includes("displayOpacityReader"), "no reader with a texture");
+  assert(!usda.includes("Texture_vertexAlpha") && !usda.includes("vertexAlphaUV"), "no ramp with a base color texture");
   assert(warnings.some((w) => w.includes("COLOR_0 alpha is not combined with the baseColorTexture alpha")), `texture + vertex alpha warning: ${warnings}`);
 }
 

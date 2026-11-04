@@ -17,6 +17,7 @@ export { sanitize };
 import { evaluateAnimation, TIME_CODES_PER_SECOND } from "./animation.js";
 import { planSkins, buildSkeleton, skinningPrimvars, NO_JOINTS, planRigidAnimation, rigidPrimvars } from "./skin.js";
 import { addBlendShapes, meshHasTargets, restWeights } from "./morph.js";
+import { encodeGrayAlphaPng } from "./png.js";
 
 const MODE_NAMES = ["POINTS", "LINES", "LINE_LOOP", "LINE_STRIP", "TRIANGLES", "TRIANGLE_STRIP", "TRIANGLE_FAN"];
 const MODE_TRIANGLES = 4;
@@ -43,8 +44,14 @@ const SUPPORTED_EXTENSIONS = new Set([
   "EXT_meshopt_compression",
 ]);
 
-/** USD primvar name for glTF TEXCOORD_n: st, st1, st2, ... */
-const uvSetName = (n) => (n === 0 ? "st" : `st${n}`);
+/** USD primvar name for glTF TEXCOORD_n: st, st1, st2, ... (strings are primvar names as-is) */
+const uvSetName = (n) => (typeof n === "string" ? n : n === 0 ? "st" : `st${n}`);
+
+// Vertex alpha (see planVertexAlpha): primvar with u = COLOR_0.a, read by a ramp texture.
+const VERTEX_ALPHA_UV = "vertexAlphaUV";
+const RAMP_SIZE = 256;
+/** u of a ramp texel center for alpha a, so linear filtering returns a. */
+const rampU = (a) => (0.5 + Math.min(1, Math.max(0, a)) * (RAMP_SIZE - 1)) / RAMP_SIZE;
 
 /**
  * @param {import("./glb.js").GltfAsset} asset
@@ -61,9 +68,9 @@ export function gltfToStage(asset, options = {}) {
     usedFileNames: new Set(),
     warn: makeWarn(options.onWarning),
     meshPrimPaths: new Map(), // "mesh:primitive" → USD paths of its Mesh prims
-    vertexAlphaMaterials: new Set(), // materials whose opacity reads primvars:displayOpacity
   };
   reportUnsupported(ctx);
+  Object.assign(ctx, planVertexAlpha(ctx.json));
   ctx.animation = evaluateAnimation(ctx, options.animation ?? 0);
 
   const layer = new Layer({
@@ -566,13 +573,23 @@ function buildMeshPrimData(ctx, parent, prim, name, skel, gltfMesh) {
     }
   }
 
+  let alpha = null;
   if (attrs.COLOR_0 !== undefined) {
-    const { rgb, alpha } = vertexColors(ctx, attrs.COLOR_0, name);
-    mesh.attr("color3f[]", "primvars:displayColor", rgb, { metadata: vertex });
-    if (alpha) {
-      const opacity = vertexOpacity(ctx, prim, alpha, name, variantMapped);
-      if (opacity) mesh.attr("float[]", "primvars:displayOpacity", opacity, { metadata: vertex });
+    const colors = vertexColors(ctx, attrs.COLOR_0, name);
+    alpha = colors.alpha;
+    mesh.attr("color3f[]", "primvars:displayColor", colors.rgb, { metadata: vertex });
+    const opacity = alpha && displayOpacity(ctx, prim, alpha);
+    if (opacity) mesh.attr("float[]", "primvars:displayOpacity", opacity, { metadata: vertex });
+  }
+  // Every mesh that can be bound to a vertex-alpha material carries the ramp UVs
+  // (alpha 1 without COLOR_0 alpha), so no mesh depends on a missing-primvar fallback.
+  if (primitiveMaterials(prim).some((m) => ctx.vertexAlphaMaterials.has(m))) {
+    const uv = new Array(pos.count * 2);
+    for (let i = 0; i < pos.count; i++) {
+      uv[i * 2] = rampU(alpha ? alpha[i] : 1);
+      uv[i * 2 + 1] = 0.5;
     }
+    mesh.attr("texCoord2f[]", `primvars:${VERTEX_ALPHA_UV}`, uv, { metadata: vertex });
   }
 
   // Extent (bounding box) is required by usdchecker for USDZ.
@@ -627,30 +644,67 @@ function vertexColors(ctx, accessorIndex, meshName) {
   return { rgb, alpha };
 }
 
+/** Materials a primitive can be bound to: its own and those of KHR_materials_variants. */
+function primitiveMaterials(prim) {
+  const mappings = prim.extensions?.KHR_materials_variants?.mappings || [];
+  return [prim.material, ...mappings.map((m) => m.material)].filter((m) => m !== undefined);
+}
+
+const usesAlpha = (mat) => mat?.alphaMode === "BLEND" || mat?.alphaMode === "MASK";
+
 /**
- * COLOR_0 alpha → primvars:displayOpacity values, or null when glTF ignores it.
+ * Vertex alpha plan. glTF: base alpha = baseColorFactor.a × baseColorTexture.a × COLOR_0.a,
+ * used only with alphaMode BLEND / MASK (OPAQUE and the default material ignore it).
  *
- * glTF: base alpha = baseColorFactor.a × baseColorTexture.a × COLOR_0.a, and alpha is
- * only used with alphaMode BLEND / MASK (OPAQUE, including the default material,
- * ignores it). UsdPreviewSurface ignores displayOpacity unless the material reads it,
- * so a BLEND / MASK material used with vertex alpha gets inputs:opacity from a
- * UsdPrimvarReader_float of displayOpacity (fallback = its baseColorFactor.a, for meshes
- * without vertex alpha), and the mesh's displayOpacity is COLOR_0.a × baseColorFactor.a.
- * UsdPreviewSurface cannot multiply two inputs, so with a baseColorTexture the texture
- * alpha stays connected and the vertex alpha is not applied (warning).
+ * Quick Look / AR Quick Look draw a material whose inputs:opacity comes from a
+ * UsdPrimvarReader_float (e.g. of displayOpacity) as fully transparent, while textures
+ * read through UV primvar readers work (tested on device, also with a UV set named other
+ * than st). So a BLEND / MASK material without a base color texture that is used with
+ * COLOR_0 alpha reads its opacity from a 256 × 1 alpha ramp texture, sampled with the
+ * primvar vertexAlphaUV (u = COLOR_0.a at a texel center, interpolated across faces like
+ * the vertex color), scaled by baseColorFactor.a. UsdPreviewSurface cannot multiply two
+ * textures, so with a baseColorTexture the texture alpha is used and the vertex alpha
+ * is not (warning).
+ * @returns {{ vertexAlphaMaterials: Set<number>, vertexAlphaTextured: Set<number> }}
  */
-function vertexOpacity(ctx, prim, alpha, meshName, variantMapped) {
-  const mat = prim.material !== undefined ? ctx.json.materials?.[prim.material] : undefined;
-  if (variantMapped) {
-    if (alpha.some((a) => a !== 1)) ctx.warn(`Mesh "${meshName}": COLOR_0 alpha is not applied to KHR_materials_variants materials`);
-    return null;
+function planVertexAlpha(json) {
+  const vertexAlphaMaterials = new Set();
+  const vertexAlphaTextured = new Set();
+  for (const mesh of json.meshes || []) {
+    for (const prim of mesh.primitives || []) {
+      const color = prim.attributes?.COLOR_0;
+      if (color === undefined || json.accessors[color]?.type !== "VEC4") continue;
+      for (const m of primitiveMaterials(prim)) {
+        const mat = json.materials?.[m];
+        if (!usesAlpha(mat)) continue;
+        (mat.pbrMetallicRoughness?.baseColorTexture ? vertexAlphaTextured : vertexAlphaMaterials).add(m);
+      }
+    }
   }
-  const alphaMode = mat?.alphaMode ?? "OPAQUE";
-  if (alphaMode !== "BLEND" && alphaMode !== "MASK") return null;
-  const pbr = mat.pbrMetallicRoughness || {};
-  const factorAlpha = (pbr.baseColorFactor ?? [1, 1, 1, 1])[3];
-  ctx.vertexAlphaMaterials.add(prim.material);
+  return { vertexAlphaMaterials, vertexAlphaTextured };
+}
+
+/**
+ * COLOR_0 alpha → primvars:displayOpacity (COLOR_0.a × baseColorFactor.a) when the
+ * primitive's material uses alpha, else null. It records the vertex alpha on the gprim;
+ * the material reads the same alpha through vertexAlphaUV (see planVertexAlpha).
+ */
+function displayOpacity(ctx, prim, alpha) {
+  const mat = prim.material !== undefined ? ctx.json.materials?.[prim.material] : undefined;
+  if (!usesAlpha(mat)) return null;
+  const factorAlpha = (mat.pbrMetallicRoughness?.baseColorFactor ?? [1, 1, 1, 1])[3];
   return alpha.map((a) => a * factorAlpha);
+}
+
+/** The ramp texture for vertex alpha (gray = alpha = x / 255), packaged once. */
+function vertexAlphaRampFile(ctx) {
+  if (ctx.rampFile) return ctx.rampFile;
+  let name = `${ctx.texturePrefix}vertex_alpha_ramp.png`;
+  for (let i = 1; ctx.usedFileNames.has(name.toLowerCase()); i++) name = `${ctx.texturePrefix}vertex_alpha_ramp_${i}.png`;
+  ctx.usedFileNames.add(name.toLowerCase());
+  ctx.files.push({ name, bytes: encodeGrayAlphaPng(RAMP_SIZE, 1, (x) => [x, x]) });
+  ctx.rampFile = name;
+  return name;
 }
 
 /** Per-corner normals of each triangle (faceVarying), for primitives without NORMAL. */
@@ -761,14 +815,16 @@ function buildMaterial(ctx, scope, mat, index) {
 
   const textures = []; // shaders to add after PreviewSurface
   const connect = (shader, output) => ({ connect: `${path}/${shader}.outputs:${output}` });
-  // Opacity without a base color texture: the factor, or the meshes' vertex alpha
-  // (primvars:displayOpacity, see vertexOpacity) with the factor as fallback.
-  let opacityReader = false;
+  // Opacity without a base color texture: the factor, or vertex alpha × factor through
+  // the ramp texture (see planVertexAlpha).
   const constantOpacity = () => {
     if (alphaMode === "OPAQUE") return;
     if (ctx.vertexAlphaMaterials.has(index)) {
-      opacityReader = true;
-      surface.attr("float", "inputs:opacity", undefined, connect("displayOpacityReader", "result"));
+      textures.push({
+        shader: "Texture_vertexAlpha", file: vertexAlphaRampFile(ctx), wrapS: "clamp", wrapT: "clamp",
+        texCoord: VERTEX_ALPHA_UV, transform: null, colorSpace: "raw", scale: [1, 1, 1, baseColor[3]],
+      });
+      surface.attr("float", "inputs:opacity", undefined, connect("Texture_vertexAlpha", "a"));
     } else {
       surface.attr("float", "inputs:opacity", baseColor[3]);
     }
@@ -776,7 +832,7 @@ function buildMaterial(ctx, scope, mat, index) {
   const textureOpacity = () => {
     if (alphaMode === "OPAQUE") return;
     surface.attr("float", "inputs:opacity", undefined, connect("Texture_baseColor", "a"));
-    if (ctx.vertexAlphaMaterials.has(index)) {
+    if (ctx.vertexAlphaTextured.has(index)) {
       ctx.warn(`Material "${name}": COLOR_0 alpha is not combined with the baseColorTexture alpha (UsdPreviewSurface cannot multiply them); the texture alpha is used`);
     }
   };
@@ -876,16 +932,9 @@ function buildMaterial(ctx, scope, mat, index) {
 
   surface.attr("token", "outputs:surface");
 
-  if (opacityReader) {
-    const reader = material.child(new Prim("Shader", "displayOpacityReader"));
-    reader.attr("token", "info:id", "UsdPrimvarReader_float", { uniform: true });
-    reader.attr("string", "inputs:varname", "displayOpacity");
-    reader.attr("float", "inputs:fallback", baseColor[3]);
-    reader.attr("float", "outputs:result");
-  }
-
-  // One primvar reader per UV set in use: uvReader_st, uvReader_st1, ...
-  for (const n of [...new Set(textures.map((t) => t.texCoord))].sort((a, b) => a - b)) {
+  // One primvar reader per UV set in use: uvReader_st, uvReader_st1, ... (named sets last)
+  const order = (n) => (typeof n === "string" ? Infinity : n);
+  for (const n of [...new Set(textures.map((t) => t.texCoord))].sort((a, b) => order(a) - order(b))) {
     const set = uvSetName(n);
     const reader = material.child(new Prim("Shader", `uvReader_${set}`));
     reader.attr("token", "info:id", "UsdPrimvarReader_float2", { uniform: true });

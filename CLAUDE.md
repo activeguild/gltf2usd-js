@@ -10,7 +10,7 @@ npm パッケージ名: `gltf2usd-js`。
 
 ## 現在の状態（段階 1〜4 完了。要相談事項は「要相談」を参照）
 
-`src/` 11 ファイル。テスト GLB（`cube.glb`、`features.glb`、`animated.glb`、`skinned.glb`、外部ファイル付き `gltf/cube.gltf`）と
+`src/` 12 ファイル。テスト GLB（`cube.glb`、`features.glb`、`animated.glb`、`skinned.glb`、外部ファイル付き `gltf/cube.gltf`）と
 Khronos サンプル（BoxTextured / CesiumMilkTruck / DamagedHelmet / BoxAnimated / InterpolationTest / RiggedSimple / RiggedFigure /
 CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 の全 30 バリデータに通して error 0 を確認済み。
 
@@ -27,6 +27,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
 | `src/names.js` | `sanitize()`, `uniqueName()` | prim 名・ジョイント名 |
 | `src/ir.js` | `Layer` / `Prim`（`attr()` / `rel()` / `child()`） | USD 側のプリム・属性ツリー。値の表現規約は冒頭コメント |
 | `src/usda.js` | `writeUsda(layer)` → USDA 文字列 | 型名から書式を決める。timeSamples 対応 |
+| `src/png.js` | `encodeGrayAlphaPng()` | 変換器が自分で作るテクスチャ（頂点アルファのランプ）用の小さな PNG 書き出し |
 | `src/usdz.js` | `packUsdz(entries)` → `Uint8Array`、`planLayout()`、`UsdzLimitError` | stored-only zip、64 バイトアライン、CRC32 自前。ZIP の上限とエントリ名を書く前に検査 |
 | `src/index.js`| `glbToUsda()`, `glbToUsdz()`, `gltfToUsda()` | 公開 API。名前は glb だが `.gltf` も受け付ける |
 | `cli.js`      | `node cli.js in.glb\|in.gltf out.usdz\|out.usda` | `.gltf` の外部ファイルは同じフォルダ以下からのみ読む |
@@ -105,7 +106,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
 - `options.onWarning`: 未対応拡張、POINTS / LINES、POSITION なし、アニメーション / スキン / カメラ / モーフ、複数シーン、
   解決できない画像、PNG / JPEG 以外の画像、マテリアルが使う TEXCOORD_n が Mesh にない
 - 入力検証（設計判断 19）: 不正な入力は `GltfValidationError`。`options.limits`（既定は `DEFAULT_LIMITS`）
-- COLOR_0 の VEC4 アルファ → BLEND / MASK のマテリアルで `primvars:displayOpacity` + `UsdPrimvarReader_float`（設計判断 20）
+- COLOR_0 の VEC4 アルファ → BLEND / MASK のマテリアルでアルファのランプ画像 + `primvars:vertexAlphaUV`（設計判断 20）
 - 行列 accessor（MAT2 / MAT3）の列ごとの 4 バイト境界
 - USDZ の ZIP 上限（設計判断 21）。超える場合は `UsdzLimitError`
 
@@ -197,11 +198,15 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
    JOINTS の範囲外（ウェイト > 0）・負 / NaN のウェイトはエラー、ウェイトの合計が 1 でない頂点は警告してそのまま書く。
    `DEFAULT_LIMITS` はメモリとスタックを守るためだけのもの（入力 2 GiB、accessor 1 本 2^26 値、ノードの深さ 1024 など）。
    変更前後で 26 個のフィクスチャの出力がバイト単位で一致することを確認済み。
-20. **頂点アルファ。** glTF はアルファ = factor.a × テクスチャ.a × COLOR_0.a で、BLEND / MASK のときだけ使う（OPAQUE・既定マテリアルは無視）。
-   UsdPreviewSurface は displayOpacity を自動では使わないので、頂点アルファ付きで使われる BLEND / MASK マテリアル（テクスチャなし）は
-   `inputs:opacity` を `UsdPrimvarReader_float`（`displayOpacity`、fallback = factor.a）から取り、メッシュの displayOpacity は
-   COLOR_0.a × factor.a。マテリアルを共有する頂点アルファなしのメッシュは fallback で factor.a のまま。OpenUSD の UsdShade で接続が
-   解決されることは確認済み。**Quick Look / AR Quick Look での表示は未確認**（usdzconvert は頂点アルファを捨てている）。
+20. **頂点アルファはランプ画像 + 専用 UV で表す。** glTF はアルファ = factor.a × テクスチャ.a × COLOR_0.a で、BLEND / MASK のときだけ使う
+   （OPAQUE・既定マテリアルは無視）。最初は `inputs:opacity` ← `UsdPrimvarReader_float`（`displayOpacity`）にしたが、**Quick Look は
+   float / float3 の primvar reader を 0 として描く**（BLEND も MASK も消える。float3 で diffuse に繋ぐと黒）。UV の reader + テクスチャは、
+   UV の名前が `st` 以外でも描ける（1 ファイルに 6 方式を並べて実機で確認）。そこで頂点アルファ付きで使われる BLEND / MASK マテリアル
+   （ベースカラーテクスチャなし）は opacity を `Texture_vertexAlpha`（256 × 1 の gray+alpha ランプ `vertex_alpha_ramp.png`、
+   `inputs:scale = (1,1,1,factor.a)`、clamp）の `a` から取り、メッシュには `primvars:vertexAlphaUV` = (テクセル中心の u = COLOR_0.a, 0.5) を書く。
+   そのマテリアルに（variant 経由も含め）バインドされうるメッシュは全部この UV を持つ（なければ u = 1）。`displayOpacity` も記録として書く。
+   ベースカラーテクスチャとの掛け合わせはできないのでテクスチャのアルファを使い警告。対象マテリアルは `planVertexAlpha()` で事前に決める。
+   **ランプ方式の実機表示は未確認（確認用 vertex-alpha.usdz で確認中）。**
 21. **USDZ の ZIP 上限は書く前に検査する。** `planLayout()` が長さだけから全オフセットを計算し、32 / 16 ビットのフィールドに収まらなければ
    `UsdzLimitError`（"USDZ exceeds supported ZIP size limits"）。エントリ名は相対・スラッシュ区切り・`.` `..` 空セグメントなし・
    大文字小文字を無視して一意、先頭は .usda / .usdc / .usd。出力バイトは変更前と同一。

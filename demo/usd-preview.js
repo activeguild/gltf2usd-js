@@ -1,6 +1,6 @@
 // Builds a three.js scene from a parsed USDA layer (see usda-parser.js) and the
 // files of its USDZ package. Covers what gltf2usd.js writes: Xform hierarchy,
-// xformOps, Mesh (normals / st / displayColor with any interpolation; displayOpacity read by a material),
+// xformOps, Mesh (normals / st / named UV sets / displayColor with any interpolation; displayOpacity read by a material),
 // UsdPreviewSurface with UsdUVTexture inputs, and UsdSkel (Skeleton +
 // SkelAnimation joints, BlendShapes and their weights). Anything else is reported in
 // `warnings` so it is obvious when the preview, not the converter, is the limit.
@@ -203,6 +203,11 @@ export function buildUsdScene(layer, entries, options = {}) {
     if (dc?.value) geom.setAttribute("color", expandPrimvar(prim, dc, 3, corners, vertexOf, "constant"));
 
     let material = buildBoundMaterial(prim, !!dc?.value);
+    // Textures read through a named UV set (channel 3, see loadTexture).
+    for (const tex of [material.map, material.alphaMap]) {
+      const named = tex?.userData.primvar && prim.props.get(`primvars:${tex.userData.primvar}`);
+      if (named?.value) geom.setAttribute("uv3", expandPrimvar(prim, named, 2, corners, vertexOf, "vertex"));
+    }
     // A material whose opacity reads a primvar (displayOpacity): per-vertex alpha.
     // USD's material ignores displayColor, so the RGB of the vertex color is white.
     const opacityPrimvar = material.userData.opacityPrimvar;
@@ -451,8 +456,10 @@ export function buildUsdScene(layer, entries, options = {}) {
     const opacity = input("opacity");
     const threshold = input("opacityThreshold")?.value ?? 0;
     if (opacity?.texture) {
-      if (opacity.texture !== mat.map) warn("diffuse と別テクスチャの opacity は未対応");
       if (opacity.channel !== "a") warn(`opacity がチャンネル ${opacity.channel} に接続されている（a 以外は未対応）`);
+      // A separate opacity texture (e.g. the vertex alpha ramp): three.js alphaMap reads G,
+      // so it is exact for gray = alpha textures like the ramp.
+      if (opacity.texture !== mat.map) mat.alphaMap = opacity.texture;
       mat.opacity = opacity.scale[3];
     } else if (typeof opacity?.value === "number") {
       mat.opacity = opacity.value;
@@ -599,6 +606,10 @@ export function buildUsdScene(layer, entries, options = {}) {
     const m = /^st(\d*)$/.exec(varname ?? "st");
     if (m && Number(m[1] || 0) <= 3) {
       tex.channel = Number(m[1] || 0);
+    } else if (varname && !m) {
+      // A named UV set (e.g. vertexAlphaUV): the mesh copies it into uv3.
+      tex.channel = 3;
+      tex.userData.primvar = varname;
     } else {
       warn(`varname "${varname}" の UV セットはプレビューでは st として表示`);
     }
