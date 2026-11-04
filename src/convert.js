@@ -38,6 +38,7 @@ const SUPPORTED_EXTENSIONS = new Set([
   "KHR_mesh_quantization",
   "KHR_materials_unlit",
   "KHR_lights_punctual",
+  "EXT_mesh_gpu_instancing",
 ]);
 
 /** USD primvar name for glTF TEXCOORD_n: st, st1, st2, ... */
@@ -169,6 +170,10 @@ function buildNode(ctx, parent, nodeIndex, siblingNames, parentPath) {
 
   // Mesh prims and child nodes share one namespace under this Xform.
   const names = new Set();
+  if (node.extensions?.EXT_mesh_gpu_instancing && node.mesh !== undefined &&
+      (ctx.skinnedNodes.has(nodeIndex) || meshHasTargets(ctx.json.meshes[node.mesh]))) {
+    ctx.warn(`Node ${nodeIndex}: EXT_mesh_gpu_instancing on a skinned / morphed mesh is not supported; drawn once`);
+  }
   if (node.mesh !== undefined && !ctx.skinnedNodes.has(nodeIndex)) {
     const protoName = ctx.prototypes.get(node.mesh);
     if (meshHasTargets(ctx.json.meshes[node.mesh])) {
@@ -181,6 +186,8 @@ function buildNode(ctx, parent, nodeIndex, siblingNames, parentPath) {
       buildMeshPrims(ctx, skelRoot, node.mesh, new Set(["Skeleton", "Animation"]), { plan: null, skelRootPath, shapes, node: nodeIndex });
       buildSkeleton(ctx, NO_JOINTS, skelRoot, skelRootPath, shapes, (nd) => restWeights(ctx, nd));
       skelPrimsFirst(skelRoot);
+    } else if (node.extensions?.EXT_mesh_gpu_instancing) {
+      buildGpuInstances(ctx, xform, node, names, protoName);
     } else if (protoName) {
       const mesh = ctx.json.meshes[node.mesh];
       const instName = uniqueName(sanitize(mesh.name, `Mesh_${node.mesh}`), names);
@@ -251,6 +258,50 @@ function buildLight(ctx, xform, index, names) {
   prim.attr("float", "inputs:intensity", intensity);
 }
 
+/** Instances drawn by a node: EXT_mesh_gpu_instancing's attribute count, else 1. */
+function gpuInstanceCount(ctx, node) {
+  const attrs = node.extensions?.EXT_mesh_gpu_instancing?.attributes;
+  if (!attrs) return 1;
+  const counts = ["TRANSLATION", "ROTATION", "SCALE"].map((k) => ctx.json.accessors?.[attrs[k]]?.count).filter((c) => c !== undefined);
+  return counts.length ? Math.min(...counts) : 1;
+}
+
+/**
+ * EXT_mesh_gpu_instancing: the node's mesh is drawn once per instance, with
+ * T · R · S from the per-instance attributes applied in the node's space. Each
+ * instance becomes an Xform with that transform: an instanceable reference to
+ * the mesh prototype when there is one, otherwise a copy of the mesh.
+ */
+function buildGpuInstances(ctx, xform, node, names, protoName) {
+  const attrs = node.extensions.EXT_mesh_gpu_instancing.attributes || {};
+  const mesh = ctx.json.meshes[node.mesh];
+  const base = sanitize(mesh.name, `Mesh_${node.mesh}`);
+  const count = gpuInstanceCount(ctx, node);
+  let T = null, R = null, S = null;
+  try {
+    if (attrs.TRANSLATION !== undefined) T = ctx.asset.accessor(attrs.TRANSLATION).data;
+    if (attrs.ROTATION !== undefined) R = ctx.asset.accessor(attrs.ROTATION).data;
+    if (attrs.SCALE !== undefined) S = ctx.asset.accessor(attrs.SCALE).data;
+  } catch (e) {
+    if (!(e instanceof DataUnavailableError)) throw e;
+    ctx.warn(`Mesh "${base}": EXT_mesh_gpu_instancing data skipped: ${e.message}`);
+    return;
+  }
+  for (let i = 0; i < count; i++) {
+    const m = composeTRS(
+      T ? Array.from(T.slice(i * 3, i * 3 + 3)) : [0, 0, 0],
+      R ? Array.from(R.slice(i * 4, i * 4 + 4)) : [0, 0, 0, 1],
+      S ? Array.from(S.slice(i * 3, i * 3 + 3)) : [1, 1, 1],
+    );
+    const instName = uniqueName(`${base}_${i}`, names);
+    const metadata = protoName ? { instanceable: true, "prepend references": { path: `/Root/Meshes/${protoName}` } } : {};
+    const inst = xform.child(new Prim("Xform", instName, { metadata }));
+    inst.attr("matrix4d", "xformOp:transform", m);
+    inst.attr("token[]", "xformOpOrder", ["xformOp:transform"], { uniform: true });
+    if (!protoName) buildMeshPrims(ctx, inst, node.mesh, new Set());
+  }
+}
+
 /** Skeleton and SkelAnimation first in a SkelRoot (readability only). */
 function skelPrimsFirst(skelRoot) {
   const rank = (p) => ({ Skeleton: 0, SkelAnimation: 1 })[p.type] ?? 2;
@@ -283,7 +334,7 @@ function planPrototypes(ctx, sceneNodes, enabled) {
     const node = ctx.json.nodes[i];
     // Skinned and morphed meshes are bound per node, so they are not instanced.
     if (node.mesh === undefined || ctx.skinnedNodes.has(i) || meshHasTargets(ctx.json.meshes[node.mesh])) continue;
-    uses.set(node.mesh, (uses.get(node.mesh) ?? 0) + 1);
+    uses.set(node.mesh, (uses.get(node.mesh) ?? 0) + gpuInstanceCount(ctx, node));
   }
   const used = new Set();
   [...uses.keys()].sort((a, b) => a - b).forEach((meshIndex) => {

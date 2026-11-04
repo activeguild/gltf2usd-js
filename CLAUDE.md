@@ -76,6 +76,9 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
 - スキン → `/Root/Skins/<Skin>`（SkelRoot）に Skeleton / SkelAnimation / メッシュ。JOINTS_n / WEIGHTS_n すべて（elementSize = 4n）
 - モーフターゲット → Mesh 子の `BlendShape`（offsets / normalOffsets、疎なら pointIndices）。スキンなしのメッシュは
   ノードの下に専用 SkelRoot（ジョイント 0 個の Skeleton）。ウェイトは node.weights / mesh.weights と weights アニメーション
+- EXT_mesh_gpu_instancing → インスタンスごとに `xformOp:transform`（T·R·S）付きの Xform。メッシュのプロトタイプへの
+  instanceable reference（`instancing: false` なら複製）。PointInstancer は AR Quick Look 等での対応が不確かなので使っていない。
+  Khronos SimpleInstancing（125 個）で three.js の InstancedMesh とワールド行列が 5e-7 以内で一致
 - KHR_lights_punctual → UsdLux（directional → DistantLight、point → SphereLight + treatAsPoint、spot → + ShapingAPI。
   強さは glTF の lux / candela をそのまま。UsdLux は単位を明示していないので近似。range は警告。AR Quick Look はライトを無視する）
 - KHR_materials_unlit（近似: diffuseColor = 黒、baseColor → emissiveColor、`ior = 1` でフレネル反射を消す。他の PBR 入力は無視）

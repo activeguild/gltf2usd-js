@@ -205,6 +205,28 @@ assert(f.usda.includes('def Mesh "CubeC"') && f.usda.includes('def Xform "CubeC_
   assert(w.length === 0, `no warnings for skinned.glb: ${w}`);
 }
 
+// ---- EXT_mesh_gpu_instancing: one prim per instance (instanceable when instancing is on) ----
+{
+  const { gltf, resources } = buildCubeGltf();
+  const j = JSON.parse(gltf);
+  const T = new Float32Array([0, 0, 0, 2, 0, 0, 4, 0, 0]);
+  const S3 = new Float32Array([1, 1, 1, 0.5, 0.5, 0.5, 1, 2, 1]);
+  const bytes = new Uint8Array([...new Uint8Array(T.buffer), ...new Uint8Array(S3.buffer)]);
+  j.buffers.push({ byteLength: bytes.length, uri: `data:application/octet-stream;base64,${btoa(String.fromCharCode(...bytes))}` });
+  j.bufferViews.push({ buffer: 1, byteOffset: 0, byteLength: 36 }, { buffer: 1, byteOffset: 36, byteLength: 36 });
+  j.accessors.push({ bufferView: j.bufferViews.length - 2, componentType: 5126, count: 3, type: "VEC3" });
+  j.accessors.push({ bufferView: j.bufferViews.length - 1, componentType: 5126, count: 3, type: "VEC3" });
+  j.extensionsUsed = ["EXT_mesh_gpu_instancing"];
+  j.nodes = [{ name: "Grid", mesh: 0, extensions: { EXT_mesh_gpu_instancing: { attributes: { TRANSLATION: j.accessors.length - 2, SCALE: j.accessors.length - 1 } } } }];
+  const w = [];
+  const g = glbToUsda(j, { resources, onWarning: (m) => w.push(m) }).usda;
+  assert(count(g, "prepend references = </Root/Meshes/Cube>") === 3 && count(g, 'def Mesh "Cube"') === 1, "3 instances of one prototype");
+  assert(g.includes("matrix4d xformOp:transform = ( (0.5, 0, 0, 0), (0, 0.5, 0, 0), (0, 0, 0.5, 0), (2, 0, 0, 1) )"), "instance T · S");
+  assert(g.includes('def Xform "Cube_2"') && w.length === 0, `instance names / no warnings: ${w}`);
+  const flatInst = glbToUsda(j, { resources, instancing: false }).usda;
+  assert(count(flatInst, 'def Mesh "Cube"') === 3 && !flatInst.includes("instanceable"), "instancing: false copies the mesh per instance");
+}
+
 // ---- Compressed data that cannot be decoded is skipped, not written as zeros ----
 {
   const { gltf, resources } = buildCubeGltf();
