@@ -105,7 +105,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
   three.js と比較して一致を確認）
 - KHR_materials_emissive_strength（emissiveColor に乗算）、KHR_materials_ior（`inputs:ior`）、
   KHR_materials_clearcoat（`inputs:clearcoat` / `clearcoatRoughness`、テクスチャは R / G。clearcoatNormal は警告）
-- `options.onWarning`: 未対応拡張、POINTS / LINES、POSITION なし、アニメーション / スキン / カメラ / モーフ、複数シーン、
+- `options.onWarning`: 未対応拡張、POINTS / LINES、アニメーション / スキン / カメラ / モーフ、複数シーン、
   解決できない画像、PNG / JPEG 以外の画像、マテリアルが使う TEXCOORD_n が Mesh にない
 - 入力検証（設計判断 19）: 不正な入力は `GltfValidationError`。`options.limits`（既定は `DEFAULT_LIMITS`）
 - COLOR_0 の VEC4 アルファ → BLEND / MASK のマテリアルでアルファのランプ画像 + `primvars:vertexAlphaUV`（設計判断 20）
@@ -202,6 +202,14 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
    Mesh: 頂点属性（NORMAL / TANGENT / TEXCOORD_n / COLOR_n / JOINTS_n / WEIGHTS_n）と morph target の要素数は POSITION と同じ
    （`_NAME` の独自属性は対象外）、インデックスは SCALAR・5121/5123/5125・normalized なし、TRIANGLES は 3 の倍数（インデックスなしなら頂点数）、
    mode は 0..6、インデックスの値は POSITION の数未満（値はデコード後でないと分からないので `buildTriangleIndices()` で検査）。
+   属性の type / componentType は glTF 2.0 § 3.7.2.1 どおり（POSITION / NORMAL VEC3、TANGENT VEC4、TEXCOORD_n VEC2、COLOR_n VEC3/VEC4、
+   JOINTS_n / WEIGHTS_n VEC4。COLOR / WEIGHTS の整数は normalized の UNSIGNED_BYTE / SHORT のみ、JOINTS は normalized でない
+   UNSIGNED_BYTE / SHORT のみ）。KHR_mesh_quantization の整数型は extensionsUsed にあるときだけ許す。morph target も同様（TANGENT は VEC3）。
+   JOINTS_n と WEIGHTS_n は対で、番号は 0 から欠けなし。POSITION のない primitive はエラー（glTF の仕様上は「描かない」でよいが、
+   変換するジオメトリがないので入力検証で止める。`buildMeshPrimData()` の警告とスキップは防御用に残している）。
+   sparse / indices / values はオブジェクト、sparse の indices は GltfAsset の生成時に読んで、昇順・重複なし・count 未満を確認する
+   （どこからも読まれない accessor でも検出する。meshopt で読めない view は読むときに確認）。
+   以前は警告して正規化していた「normalized のない整数の COLOR_0」も、この規則でエラーになった。
    JSON の型: トップレベル配列の要素・primitive・target・sampler・channel はオブジェクト、children / scene.nodes / samplers / channels /
    primitives / targets は配列（標準の TypeError を出さない）。
    `DEFAULT_LIMITS` はメモリとスタックを守るためだけのもの（入力 2 GiB、accessor 1 本 2^26 値、ノードの深さ 1024 など）。

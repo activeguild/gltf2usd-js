@@ -202,13 +202,11 @@ for (const [cutoff, factor] of [[0.25, 1], [0.25, 0.5], [0.5, 1], [0.7, 0.8], [1
   assert(line(u8, "float[] primvars:displayOpacity").includes("[1, 0.5019608, 0]"), `UNSIGNED_BYTE alpha 128/255: ${line(u8, "displayOpacity")}`);
   const u16 = convert(colored({ type: "VEC3", componentType: 5123, colors: RGB })).usda;
   assert(line(u16, "primvars:displayColor").includes("[(1, 0, 0), (0, 1, 0), (0, 0, 1)]"), "UNSIGNED_SHORT normalized");
-  // Missing `normalized` on an integer color: normalized anyway, with a warning.
-  const { usda, warnings } = convert(colored({ componentType: 5121, normalized: false, colors: RGBA }));
-  assert(line(usda, "primvars:displayColor").includes("[(1, 0, 0), (0, 1, 0), (0, 0, 1)]"), "unnormalized UNSIGNED_BYTE normalized");
-  assert(warnings.some((w) => w.includes("is not marked normalized")), `unnormalized warning: ${warnings}`);
-  // Signed integers without normalized are not valid colors.
-  try { convert(colored({ componentType: 5120, normalized: false, colors: RGBA })); assert(false, "unnormalized BYTE COLOR_0 accepted"); }
-  catch (e) { assert(e instanceof GltfValidationError && /must be FLOAT, or normalized/.test(e.message), `unnormalized BYTE: ${e.message}`); }
+  // Integer colors must be normalized UNSIGNED_BYTE / UNSIGNED_SHORT (glTF 2.0; validate.js).
+  for (const [componentType, label] of [[5121, "UNSIGNED_BYTE"], [5120, "BYTE"], [5122, "SHORT"]]) {
+    try { convert(colored({ componentType, normalized: false, colors: RGBA })); assert(false, `unnormalized ${label} COLOR_0 accepted`); }
+    catch (e) { assert(e instanceof GltfValidationError && new RegExp(`COLOR_0 \\(accessor 1\\) is ${label}; allowed: FLOAT, normalized UNSIGNED_BYTE, normalized UNSIGNED_SHORT`).test(e.message), `unnormalized ${label}: ${e.message}`); }
+  }
 }
 {
   // COLOR_0 as VEC2 is invalid.

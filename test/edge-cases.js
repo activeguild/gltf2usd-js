@@ -169,7 +169,8 @@ rejects(skinned([0, 2, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0], W), /JOINTS_0 of vertex 0 
 assert(run(skinned([0, 1, 9, 0, 0, 1, 0, 0, 1, 0, 0, 0], W)).usda.includes("primvars:skel:jointIndices"), "unused slot may hold any index");
 rejects(skinned(J, [0.5, 0.5, 0, 0, -1, 0, 0, 0, 1, 0, 0, 0]), /WEIGHTS_0 of vertex 1 is -1/, "negative weight");
 rejects(skinned(J, [0.5, NaN, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]), /WEIGHTS_0 of vertex 0 is NaN/, "NaN weight");
-rejects(skinned([0, 1.5, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0], W, { jointsType: 5126 }), /JOINTS_0 of vertex 0 is 1.5/, "fractional joint index");
+// FLOAT joints are not allowed at all (UNSIGNED_BYTE / UNSIGNED_SHORT only; validate.js).
+rejects(skinned([0, 1.5, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0], W, { jointsType: 5126 }), /JOINTS_0 \(accessor 2\) is FLOAT; allowed: UNSIGNED_BYTE, UNSIGNED_SHORT/, "FLOAT joint indices");
 {
   const unweighted = run(skinned(J, [0.5, 0.5, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0]));
   assert(unweighted.warnings.some((w) => /1 vertices have no joint weight/.test(w)), `zero weights: ${unweighted.warnings}`);

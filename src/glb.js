@@ -126,6 +126,36 @@ export class GltfAsset {
     validateDocument(json, this.limits);
     this._buffers = (json.buffers || []).map((b, i) => this._loadBuffer(b, i));
     this._decodedViews = new Map(); // EXT_meshopt_compression results by bufferView index
+    // Sparse indices must be strictly increasing and below count; check them up front
+    // (validate.js only sees the JSON). Unreadable views are checked when decoded instead.
+    (json.accessors || []).forEach((acc, i) => {
+      if (!acc.sparse) return;
+      try {
+        this._sparseIndices(i, acc);
+      } catch (e) {
+        if (!(e instanceof DataUnavailableError)) throw e;
+      }
+    });
+  }
+
+  /** The sparse indices of accessor `index`, checked (strictly increasing, < count). */
+  _sparseIndices(index, acc) {
+    const s = acc.sparse;
+    const view = this._viewData(s.indices.bufferView);
+    const reader = componentReader(new DataView(view.buffer), s.indices.componentType);
+    const size = COMPONENT_SIZE[s.indices.componentType];
+    const base = view.byteOffset + (s.indices.byteOffset || 0);
+    const out = new Array(s.count);
+    let previous = -1;
+    for (let i = 0; i < s.count; i++) {
+      const target = reader(base + i * size);
+      if (target >= acc.count || target <= previous) {
+        const why = target >= acc.count ? `not below count ${acc.count}` : target === previous ? "a duplicate" : `smaller than the previous index ${previous}`;
+        throw new GltfValidationError(`Invalid sparse accessor indices: accessor ${index} sparse index ${i} is ${target} (${why}); indices must be strictly increasing`);
+      }
+      out[i] = previous = target;
+    }
+    return out;
   }
 
   _loadBuffer(buffer, index) {
@@ -223,25 +253,15 @@ export class GltfAsset {
 
   _applySparse(index, acc, data, numComponents, info, layout) {
     const s = acc.sparse;
-    const idxView = this._viewData(s.indices.bufferView);
-    const idxDv = new DataView(idxView.buffer);
-    const idxReader = componentReader(idxDv, s.indices.componentType);
-    const idxSize = COMPONENT_SIZE[s.indices.componentType];
-    const idxBase = idxView.byteOffset + (s.indices.byteOffset || 0);
+    const targets = this._sparseIndices(index, acc);
 
     const valView = this._viewData(s.values.bufferView);
     const valDv = new DataView(valView.buffer);
     const valReader = componentReader(valDv, acc.componentType);
     const valBase = valView.byteOffset + (s.values.byteOffset || 0);
 
-    let previous = -1;
     for (let i = 0; i < s.count; i++) {
-      const target = idxReader(idxBase + i * idxSize);
-      // The spec requires strictly increasing indices below count.
-      if (target >= acc.count || target <= previous) {
-        throw new GltfValidationError(`Invalid sparse accessor indices: accessor ${index} sparse index ${i} is ${target} (previous ${previous}, count ${acc.count})`);
-      }
-      previous = target;
+      const target = targets[i];
       for (let c = 0; c < numComponents; c++) {
         let v = valReader(valBase + i * layout.size + layout.offsets[c]);
         if (acc.normalized) v = info.norm(v);

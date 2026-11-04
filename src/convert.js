@@ -634,7 +634,7 @@ function buildMeshPrimData(ctx, parent, prim, name, skel, gltfMesh) {
 
 /**
  * COLOR_0 → { rgb, alpha } (alpha only for VEC4). glTF requires integer colors to be
- * normalized; an integer accessor without `normalized` is normalized anyway, with a warning.
+ * normalized (validate.js rejects anything else first; the fallback below is only defensive).
  */
 function vertexColors(ctx, accessorIndex, meshName) {
   const acc = ctx.json.accessors[accessorIndex];

@@ -77,6 +77,44 @@ const isObject = (v) => !!v && typeof v === "object" && !Array.isArray(v);
 // Vertex attributes whose count must equal POSITION's (custom "_NAME" attributes are not checked).
 const VERTEX_ATTRIBUTE = /^(POSITION|NORMAL|TANGENT|TEXCOORD_\d+|COLOR_\d+|JOINTS_\d+|WEIGHTS_\d+)$/;
 const INDEX_TYPES = new Set([5121, 5123, 5125]);
+
+// Accessor type and component types per attribute semantic (glTF 2.0 § 3.7.2.1).
+// "n" = normalized integer, "i" = integer without normalized; FLOAT is always "f".
+// KHR_mesh_quantization (when the file declares it) adds the `quantized` forms.
+const BYTE = 5120, UBYTE = 5121, SHORT = 5122, USHORT = 5123, FLOAT = 5126;
+const ANY_INT = [[BYTE, "n"], [BYTE, "i"], [UBYTE, "n"], [UBYTE, "i"], [SHORT, "n"], [SHORT, "i"], [USHORT, "n"], [USHORT, "i"]];
+const ATTRIBUTE_RULES = [
+  { re: /^POSITION$/, types: ["VEC3"], core: [[FLOAT, "f"]], quantized: ANY_INT },
+  { re: /^NORMAL$/, types: ["VEC3"], core: [[FLOAT, "f"]], quantized: [[BYTE, "n"], [SHORT, "n"]] },
+  { re: /^TANGENT$/, types: ["VEC4"], core: [[FLOAT, "f"]], quantized: [[BYTE, "n"], [SHORT, "n"]] },
+  { re: /^TEXCOORD_\d+$/, types: ["VEC2"], core: [[FLOAT, "f"], [UBYTE, "n"], [USHORT, "n"]], quantized: ANY_INT },
+  { re: /^COLOR_\d+$/, types: ["VEC3", "VEC4"], core: [[FLOAT, "f"], [UBYTE, "n"], [USHORT, "n"]], quantized: [] },
+  { re: /^JOINTS_\d+$/, types: ["VEC4"], core: [[UBYTE, "i"], [USHORT, "i"]], quantized: [] },
+  { re: /^WEIGHTS_\d+$/, types: ["VEC4"], core: [[FLOAT, "f"], [UBYTE, "n"], [USHORT, "n"]], quantized: [] },
+];
+// Morph target attributes are displacements (§ 3.7.2.2); TANGENT deltas are VEC3.
+const TARGET_RULES = [
+  { re: /^POSITION$/, types: ["VEC3"], core: [[FLOAT, "f"]], quantized: [[BYTE, "n"], [BYTE, "i"], [SHORT, "n"], [SHORT, "i"]] },
+  { re: /^NORMAL$/, types: ["VEC3"], core: [[FLOAT, "f"]], quantized: [[BYTE, "n"], [SHORT, "n"]] },
+  { re: /^TANGENT$/, types: ["VEC3"], core: [[FLOAT, "f"]], quantized: [[BYTE, "n"], [SHORT, "n"]] },
+  { re: /^TEXCOORD_\d+$/, types: ["VEC2"], core: [[FLOAT, "f"]], quantized: [[BYTE, "n"], [BYTE, "i"], [UBYTE, "n"], [UBYTE, "i"], [SHORT, "n"], [SHORT, "i"], [USHORT, "n"], [USHORT, "i"]] },
+  { re: /^COLOR_\d+$/, types: ["VEC3", "VEC4"], core: [[FLOAT, "f"]], quantized: [[BYTE, "n"], [BYTE, "i"], [UBYTE, "n"], [UBYTE, "i"], [SHORT, "n"], [SHORT, "i"], [USHORT, "n"], [USHORT, "i"]] },
+];
+const COMPONENT_NAME = { [BYTE]: "BYTE", [UBYTE]: "UNSIGNED_BYTE", [SHORT]: "SHORT", [USHORT]: "UNSIGNED_SHORT", 5125: "UNSIGNED_INT", [FLOAT]: "FLOAT" };
+const formName = ([ct, kind]) => `${kind === "n" ? "normalized " : ""}${COMPONENT_NAME[ct]}`;
+
+/** Check one attribute accessor against its semantic's rules; unknown / custom names pass. */
+function checkAttribute(rules, name, acc, label, quantization, fail) {
+  const rule = rules.find((r) => r.re.test(name));
+  if (!rule) return;
+  if (!rule.types.includes(acc.type)) fail(`${label} must be ${rule.types.join(" or ")}, not ${acc.type}`);
+  const kind = acc.componentType === FLOAT ? "f" : acc.normalized ? "n" : "i";
+  const allowed = quantization ? [...rule.core, ...rule.quantized] : rule.core;
+  if (!allowed.some(([ct, k]) => ct === acc.componentType && k === kind)) {
+    const extra = !quantization && rule.quantized.some(([ct, k]) => ct === acc.componentType && k === kind) ? " (allowed only with KHR_mesh_quantization)" : "";
+    fail(`${label} is ${formName([acc.componentType, kind])}${extra}; allowed: ${allowed.map(formName).join(", ")}`);
+  }
+}
 const MODE_TRIANGLES = 4;
 // Top-level arrays whose elements the converter reads as objects.
 const OBJECT_ARRAYS = ["accessors", "animations", "buffers", "bufferViews", "cameras", "images", "materials",
@@ -192,25 +230,41 @@ export function validateDocument(json, limits) {
     if (acc.sparse !== undefined) {
       const s = acc.sparse;
       const sw = `${where} sparse`;
+      if (!isObject(s)) fail(`Invalid sparse accessor: ${sw} must be an object`);
+      if (!isObject(s.indices)) fail(`Invalid sparse accessor indices: ${sw}.indices must be an object`);
+      if (!isObject(s.values)) fail(`Invalid sparse accessor values: ${sw}.values must be an object`);
       if (!Number.isInteger(s.count) || s.count < 1 || s.count > acc.count) fail(`Invalid sparse accessor: ${sw} count ${s.count} must be in 1..${acc.count}`);
-      if (!SPARSE_INDEX_TYPES.has(s.indices?.componentType)) fail(`Invalid sparse accessor indices: ${sw} componentType ${s.indices?.componentType} must be 5121, 5123 or 5125`);
+      if (!SPARSE_INDEX_TYPES.has(s.indices.componentType)) fail(`Invalid sparse accessor indices: ${sw} componentType ${s.indices.componentType} must be 5121, 5123 or 5125`);
       const ibv = ref(s.indices.bufferView, bufferViews, "indices bufferView", sw);
       const iEnd = nonNegInt(s.indices.byteOffset, "indices byteOffset", sw) + s.count * COMPONENT_SIZE[s.indices.componentType];
       if (iEnd > ibv.byteLength) fail(`Invalid sparse accessor indices: ${sw} needs ${iEnd} bytes, bufferView ${s.indices.bufferView} has ${ibv.byteLength}`);
-      const vbv = ref(s.values?.bufferView, bufferViews, "values bufferView", sw);
+      const vbv = ref(s.values.bufferView, bufferViews, "values bufferView", sw);
       const vEnd = nonNegInt(s.values.byteOffset, "values byteOffset", sw) + s.count * layout.size;
       if (vEnd > vbv.byteLength) fail(`Invalid sparse accessor values: ${sw} needs ${vEnd} bytes, bufferView ${s.values.bufferView} has ${vbv.byteLength}`);
     }
   });
 
-  // Meshes: references, vertex counts, index accessors, triangle counts.
+  // Meshes: references, attribute types, vertex counts, skin sets, index accessors, triangle counts.
+  const quantization = Array.isArray(json.extensionsUsed) && json.extensionsUsed.includes("KHR_mesh_quantization");
   meshes.forEach((mesh, mi) => {
     if (!Array.isArray(mesh.primitives)) fail(`mesh ${mi}: primitives must be an array`);
     mesh.primitives.forEach((p, pi) => {
       const where = `mesh ${mi} primitive ${pi}`;
       if (!isObject(p)) fail(`${where} must be an object`);
       const attributes = object(p, "attributes", where);
-      for (const [name, a] of Object.entries(attributes)) ref(a, accessors, `${name} accessor`, where);
+      for (const [name, a] of Object.entries(attributes)) {
+        ref(a, accessors, `${name} accessor`, where);
+        checkAttribute(ATTRIBUTE_RULES, name, accessors[a], `${where}: ${name} (accessor ${a})`, quantization, fail);
+      }
+      // POSITION is what the converter draws; without it there is no geometry to convert.
+      if (attributes.POSITION === undefined) fail(`${where}: has no POSITION attribute`);
+      // JOINTS_n / WEIGHTS_n come in pairs, numbered 0, 1, 2, ... without gaps.
+      const setsOf = (prefix) => Object.keys(attributes).filter((k) => k.startsWith(prefix) && /^\d+$/.test(k.slice(prefix.length))).map((k) => Number(k.slice(prefix.length)));
+      const joints = setsOf("JOINTS_"), weights = setsOf("WEIGHTS_");
+      for (const n of joints) if (!weights.includes(n)) fail(`${where}: JOINTS_${n} has no matching WEIGHTS_${n}`);
+      for (const n of weights) if (!joints.includes(n)) fail(`${where}: WEIGHTS_${n} has no matching JOINTS_${n}`);
+      const sets = [...joints].sort((a, b) => a - b);
+      sets.forEach((n, k) => { if (n !== k) fail(`${where}: JOINTS_${k} / WEIGHTS_${k} are missing (sets must be numbered from 0 without gaps; found ${sets.map((x) => `_${x}`).join(", ")})`); });
       const mode = p.mode ?? MODE_TRIANGLES;
       if (!(Number.isInteger(mode) && mode >= 0 && mode <= 6)) fail(`${where}: mode ${JSON.stringify(p.mode)} is not a glTF primitive mode (0..6)`);
       // All vertex attributes have one element per vertex (POSITION's count).
@@ -237,6 +291,7 @@ export function validateDocument(json, limits) {
         if (!isObject(t)) fail(`${where} target ${ti} must be an object`);
         for (const [name, a] of Object.entries(t)) {
           ref(a, accessors, `target ${ti} ${name} accessor`, where);
+          checkAttribute(TARGET_RULES, name, accessors[a], `${where} target ${ti}: ${name} (accessor ${a})`, quantization, fail);
           if (position && accessors[a].count !== vertexCount) {
             fail(`${where} target ${ti}: ${name} (accessor ${a}) has ${accessors[a].count} elements, POSITION has ${vertexCount}`);
           }

@@ -133,7 +133,7 @@ rejects(withJson((j) => { j.meshes[0].primitives[0].indices = 2; }), /indices ac
   const swapped = b.slice();
   new DataView(swapped.buffer).setUint16(36, 2, true);
   new DataView(swapped.buffer).setUint16(38, 1, true);
-  rejects(s(() => {}, swapped), /Invalid sparse accessor indices: accessor 0 sparse index 1 is 1 \(previous 2/, "sparse indices not increasing");
+  rejects(s(() => {}, swapped), /Invalid sparse accessor indices: accessor 0 sparse index 1 is 1 \(smaller than the previous index 2\)/, "sparse indices descending");
   const outOfRange = b.slice();
   new DataView(outOfRange.buffer).setUint16(38, 3, true);
   rejects(s(() => {}, outOfRange), /Invalid sparse accessor indices: accessor 0 sparse index 1 is 3/, "sparse index >= count");
@@ -201,7 +201,10 @@ assert(DEFAULT_LIMITS.maxNodeDepth === 1024 && Object.isFrozen(DEFAULT_LIMITS), 
   rejects(attr("TEXCOORD_0", { componentType: 5126, count: 2, type: "VEC2" }), /TEXCOORD_0 \(accessor 2\) has 2 elements, POSITION \(accessor 0\) has 3/, "POSITION / TEXCOORD_0 count mismatch");
   rejects(attr("COLOR_0", { componentType: 5126, count: 5, type: "VEC4" }), /COLOR_0 \(accessor 2\) has 5 elements/, "POSITION / COLOR_0 count mismatch");
   rejects(attr("TANGENT", { componentType: 5126, count: 1, type: "VEC4" }), /TANGENT \(accessor 2\) has 1 elements/, "POSITION / TANGENT count mismatch");
-  rejects(attr("WEIGHTS_0", { componentType: 5126, count: 6, type: "VEC4" }), /WEIGHTS_0 \(accessor 2\) has 6 elements/, "POSITION / WEIGHTS_0 count mismatch");
+  rejects(withJson((j) => {
+    j.accessors.push({ componentType: 5121, count: 3, type: "VEC4" }, { componentType: 5126, count: 6, type: "VEC4" });
+    Object.assign(j.meshes[0].primitives[0].attributes, { JOINTS_0: 2, WEIGHTS_0: 3 });
+  }), /WEIGHTS_0 \(accessor 3\) has 6 elements/, "POSITION / WEIGHTS_0 count mismatch");
   // Custom attributes ("_NAME") are not vertex-count checked.
   assert(accepts(attr("_TEMPERATURE", { componentType: 5126, count: 1, type: "SCALAR" }), "custom attribute").includes("def Mesh"), "custom attribute with another count is accepted");
   rejects(withAccessor({ componentType: 5126, count: 2, type: "VEC3" }, (j, a) => { j.meshes[0].primitives[0].targets = [{ POSITION: a }]; }),
@@ -259,6 +262,77 @@ rejects(withJson((j) => { j.textures = ["t"]; }), /glTF textures\[0\] must be an
   const j = clone(json);
   j.buffers[0].uri = "tri.bin";
   rejects(j, /External buffer "tri.bin" is 44 bytes, more than limits.maxInputBytes \(40\)/, "external buffer over the limit", { limits: { maxInputBytes: 40 }, resources: { "tri.bin": bin } });
+}
+
+// ---- Attribute accessor types / component types ----
+{
+  // Replace accessor 0 (POSITION) or add an attribute accessor of the given type.
+  const zeros = (type, componentType = 5126, extra = {}) => ({ componentType, count: 3, type, ...extra });
+  const attr = (name, acc) => withJson((j) => { j.accessors.push(acc); j.meshes[0].primitives[0].attributes[name] = j.accessors.length - 1; });
+  rejects(withJson((j) => { j.accessors[0] = zeros("VEC4"); }), /mesh 0 primitive 0: POSITION \(accessor 0\) must be VEC3, not VEC4/, "POSITION VEC4");
+  rejects(attr("NORMAL", zeros("VEC4")), /NORMAL \(accessor 2\) must be VEC3, not VEC4/, "NORMAL VEC4");
+  rejects(attr("TANGENT", zeros("VEC3")), /TANGENT \(accessor 2\) must be VEC4, not VEC3/, "TANGENT VEC3");
+  rejects(attr("TEXCOORD_0", zeros("VEC3")), /TEXCOORD_0 \(accessor 2\) must be VEC2, not VEC3/, "TEXCOORD_0 VEC3");
+  rejects(attr("COLOR_0", zeros("VEC2")), /COLOR_0 \(accessor 2\) must be VEC3 or VEC4, not VEC2/, "COLOR_0 VEC2");
+  // Component types: core glTF, and KHR_mesh_quantization only when declared.
+  rejects(attr("NORMAL", zeros("VEC3", 5120, { normalized: true })), /NORMAL \(accessor 2\) is normalized BYTE \(allowed only with KHR_mesh_quantization\); allowed: FLOAT/, "quantized NORMAL without the extension");
+  const quantized = (fn) => withJson((j) => { j.extensionsUsed = ["KHR_mesh_quantization"]; j.extensionsRequired = ["KHR_mesh_quantization"]; fn(j); });
+  assert(accepts(quantized((j) => { j.accessors.push(zeros("VEC3", 5120, { normalized: true })); j.meshes[0].primitives[0].attributes.NORMAL = 2; }), "quantized NORMAL").includes("normals"), "normalized BYTE NORMAL with KHR_mesh_quantization");
+  rejects(quantized((j) => { j.accessors.push(zeros("VEC3", 5121, { normalized: true })); j.meshes[0].primitives[0].attributes.NORMAL = 2; }), /NORMAL \(accessor 2\) is normalized UNSIGNED_BYTE; allowed: FLOAT, normalized BYTE, normalized SHORT/, "UNSIGNED_BYTE NORMAL even with quantization");
+  assert(accepts(quantized((j) => { j.accessors.push(zeros("VEC2", 5122)); j.meshes[0].primitives[0].attributes.TEXCOORD_0 = 2; }), "quantized UV").includes("primvars:st"), "SHORT TEXCOORD_0 with KHR_mesh_quantization");
+  rejects(attr("TEXCOORD_0", zeros("VEC2", 5122)), /TEXCOORD_0 \(accessor 2\) is SHORT \(allowed only with KHR_mesh_quantization\)/, "SHORT TEXCOORD_0 without the extension");
+  rejects(attr("COLOR_0", zeros("VEC4", 5125)), /COLOR_0 \(accessor 2\) is UNSIGNED_INT/, "UNSIGNED_INT COLOR_0");
+  // Custom attributes are not type-checked.
+  assert(accepts(attr("_ID", zeros("SCALAR", 5125)), "custom attribute").includes("def Mesh"), "custom _ID attribute accepted");
+}
+
+// ---- JOINTS_n / WEIGHTS_n ----
+{
+  const j4 = (extra = {}) => ({ componentType: 5121, count: 3, type: "VEC4", ...extra });
+  const w4 = (extra = {}) => ({ componentType: 5126, count: 3, type: "VEC4", ...extra });
+  /** Primitive with the given skin attributes (name → accessor). */
+  const skinAttrs = (attrs) => withJson((j) => {
+    for (const [name, acc] of Object.entries(attrs)) { j.accessors.push(acc); j.meshes[0].primitives[0].attributes[name] = j.accessors.length - 1; }
+  });
+  rejects(skinAttrs({ JOINTS_0: { ...j4(), type: "VEC3" }, WEIGHTS_0: w4() }), /JOINTS_0 \(accessor 2\) must be VEC4, not VEC3/, "JOINTS_0 VEC3");
+  rejects(skinAttrs({ JOINTS_0: j4(), WEIGHTS_0: { ...w4(), type: "VEC3" } }), /WEIGHTS_0 \(accessor 3\) must be VEC4, not VEC3/, "WEIGHTS_0 VEC3");
+  rejects(skinAttrs({ JOINTS_0: j4() }), /mesh 0 primitive 0: JOINTS_0 has no matching WEIGHTS_0/, "JOINTS_0 only");
+  rejects(skinAttrs({ WEIGHTS_0: w4() }), /mesh 0 primitive 0: WEIGHTS_0 has no matching JOINTS_0/, "WEIGHTS_0 only");
+  rejects(skinAttrs({ JOINTS_1: j4(), WEIGHTS_1: w4() }), /JOINTS_0 \/ WEIGHTS_0 are missing \(sets must be numbered from 0 without gaps; found _1\)/, "JOINTS_1 / WEIGHTS_1 without set 0");
+  rejects(skinAttrs({ JOINTS_1: j4() }), /JOINTS_1 has no matching WEIGHTS_1/, "JOINTS_1 only");
+  rejects(skinAttrs({ JOINTS_0: j4(), WEIGHTS_1: w4() }), /JOINTS_0 has no matching WEIGHTS_0/, "JOINTS_0 with WEIGHTS_1");
+  rejects(skinAttrs({ JOINTS_0: j4(), WEIGHTS_0: w4(), JOINTS_2: j4(), WEIGHTS_2: w4() }), /JOINTS_1 \/ WEIGHTS_1 are missing/, "gap in the sets");
+  rejects(skinAttrs({ JOINTS_0: j4({ componentType: 5126 }), WEIGHTS_0: w4() }), /JOINTS_0 \(accessor 2\) is FLOAT; allowed: UNSIGNED_BYTE, UNSIGNED_SHORT/, "JOINTS FLOAT");
+  rejects(skinAttrs({ JOINTS_0: j4({ normalized: true }), WEIGHTS_0: w4() }), /JOINTS_0 \(accessor 2\) is normalized UNSIGNED_BYTE/, "JOINTS normalized");
+  rejects(skinAttrs({ JOINTS_0: j4({ componentType: 5125 }), WEIGHTS_0: w4() }), /JOINTS_0 \(accessor 2\) is UNSIGNED_INT/, "JOINTS UNSIGNED_INT");
+  rejects(skinAttrs({ JOINTS_0: j4(), WEIGHTS_0: w4({ componentType: 5121 }) }), /WEIGHTS_0 \(accessor 3\) is UNSIGNED_BYTE; allowed: FLOAT, normalized UNSIGNED_BYTE, normalized UNSIGNED_SHORT/, "WEIGHTS unnormalized UNSIGNED_BYTE");
+  rejects(skinAttrs({ JOINTS_0: j4(), WEIGHTS_0: w4({ componentType: 5122, normalized: true }) }), /WEIGHTS_0 \(accessor 3\) is normalized SHORT/, "WEIGHTS normalized SHORT");
+  rejects(skinAttrs({ JOINTS_0: j4({ count: 2 }), WEIGHTS_0: w4() }), /JOINTS_0 \(accessor 2\) has 2 elements, POSITION \(accessor 0\) has 3/, "JOINTS count mismatch");
+  // Valid pairs (two sets, USHORT joints, normalized UBYTE weights) pass validation.
+  assert(accepts(skinAttrs({ JOINTS_0: j4(), WEIGHTS_0: w4(), JOINTS_1: j4({ componentType: 5123 }), WEIGHTS_1: w4({ componentType: 5121, normalized: true }) }), "two skin sets").includes("def Mesh"), "valid JOINTS / WEIGHTS sets");
+}
+
+// ---- POSITION is required ----
+rejects(withJson((j) => { delete j.meshes[0].primitives[0].attributes.POSITION; j.meshes[0].primitives[0].attributes.NORMAL = 0; }), /mesh 0 primitive 0: has no POSITION attribute/, "primitive without POSITION");
+rejects(withJson((j) => { j.meshes[0].primitives.push({ attributes: {} }); }), /mesh 0 primitive 1: has no POSITION attribute/, "second primitive without attributes");
+
+// ---- Sparse structure ----
+{
+  const sparse = (value) => withJson((j) => { j.accessors[0].sparse = value; });
+  rejects(sparse(null), /Invalid sparse accessor: accessor 0 sparse must be an object/, "sparse null");
+  rejects(sparse([1]), /accessor 0 sparse must be an object/, "sparse array");
+  rejects(sparse({ count: 1, indices: null, values: { bufferView: 0 } }), /accessor 0 sparse.indices must be an object/, "sparse.indices null");
+  rejects(sparse({ count: 1, indices: { bufferView: 1, componentType: 5123 }, values: null }), /accessor 0 sparse.values must be an object/, "sparse.values null");
+  rejects(sparse({ count: 1.5, indices: { bufferView: 1, componentType: 5123 }, values: { bufferView: 0 } }), /sparse count 1.5 must be in 1..3/, "fractional sparse.count");
+  rejects(sparse({ count: 1, indices: { bufferView: 9, componentType: 5123 }, values: { bufferView: 0 } }), /indices bufferView 9 does not exist/, "sparse.indices.bufferView missing");
+  rejects(sparse({ count: 1, indices: { bufferView: 1, componentType: 5123 }, values: {} }), /values bufferView undefined does not exist/, "sparse.values.bufferView missing");
+  // Duplicate indices (the triangle's index buffer is [0, 1, 2] → make it [1, 1, 2]), checked
+  // before conversion even for an accessor nothing reads.
+  const b = bin.slice();
+  new DataView(b.buffer).setUint16(36, 1, true);
+  const j = clone(json);
+  j.accessors.push({ componentType: 5126, count: 3, type: "SCALAR", sparse: { count: 2, indices: { bufferView: 1, componentType: 5123 }, values: { bufferView: 0 } } });
+  rejects(makeGlb(j, b), /accessor 2 sparse index 1 is 1 \(a duplicate\); indices must be strictly increasing/, "duplicate sparse indices in an unused accessor");
 }
 
 // No internal TypedArray / DataView errors escape for any single-byte corruption of the
