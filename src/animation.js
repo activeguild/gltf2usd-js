@@ -11,6 +11,7 @@
 // glTF times are seconds; time codes are seconds × TIME_CODES_PER_SECOND.
 
 import { slerp } from "./math.js";
+import { DataUnavailableError } from "./glb.js";
 
 export const TIME_CODES_PER_SECOND = 24;
 const STEP_EPSILON = 1e-3; // time codes
@@ -70,7 +71,14 @@ export function evaluateAnimation(ctx, which = 0) {
     const sampler = anim.samplers?.[channel.sampler];
     if (!sampler) continue;
 
-    const samples = evaluateSampler(ctx, sampler, target.path, name);
+    let samples;
+    try {
+      samples = evaluateSampler(ctx, sampler, target.path, name);
+    } catch (e) {
+      if (!(e instanceof DataUnavailableError)) throw e;
+      ctx.warn(`Animation "${name}": channel for node ${target.node} ${target.path} skipped: ${e.message}`);
+      continue;
+    }
     if (!samples.length) continue;
     start = Math.min(start, samples[0][0]);
     end = Math.max(end, samples[samples.length - 1][0]);

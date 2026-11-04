@@ -64,6 +64,18 @@ export function parseGLB(arrayBuffer) {
 }
 
 /**
+ * Thrown when an accessor's bytes are not in the file in readable form, e.g. a
+ * bufferView compressed with EXT_meshopt_compression whose buffer is only a
+ * fallback placeholder. Callers skip the affected primitive / channel and warn.
+ */
+export class DataUnavailableError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "DataUnavailableError";
+  }
+}
+
+/**
  * Thin wrapper giving typed access to glTF buffers / bufferViews / accessors / images.
  */
 export class GltfAsset {
@@ -81,6 +93,8 @@ export class GltfAsset {
 
   _loadBuffer(buffer, index) {
     if (buffer.uri === undefined) {
+      // EXT_meshopt_compression: a "fallback" buffer has no data; its views must be decoded.
+      if (buffer.extensions?.EXT_meshopt_compression?.fallback) return null;
       if (index !== 0 || !this.bin) throw new Error(`Buffer ${index} has no uri and no GLB BIN chunk`);
       return this.bin;
     }
@@ -98,8 +112,19 @@ export class GltfAsset {
   /** Raw bytes of a bufferView. */
   bufferViewBytes(index) {
     const bv = this.json.bufferViews[index];
-    const buf = this._buffers[bv.buffer];
+    const buf = this._viewBuffer(index);
     return new Uint8Array(buf.buffer, buf.byteOffset + (bv.byteOffset || 0), bv.byteLength);
+  }
+
+  /** The buffer holding a bufferView's bytes, or DataUnavailableError. */
+  _viewBuffer(index) {
+    const bv = this.json.bufferViews[index];
+    const buf = this._buffers[bv.buffer];
+    if (!buf) {
+      const how = bv.extensions?.EXT_meshopt_compression ? " (EXT_meshopt_compression)" : "";
+      throw new DataUnavailableError(`bufferView ${index} is compressed${how} and cannot be read`);
+    }
+    return buf;
   }
 
   /**
@@ -116,7 +141,7 @@ export class GltfAsset {
 
     if (acc.bufferView !== undefined) {
       const bv = this.json.bufferViews[acc.bufferView];
-      const buf = this._buffers[bv.buffer];
+      const buf = this._viewBuffer(acc.bufferView);
       const base = buf.byteOffset + (bv.byteOffset || 0) + (acc.byteOffset || 0);
       const elemSize = info.size * numComponents;
       const stride = bv.byteStride || elemSize;
@@ -139,14 +164,14 @@ export class GltfAsset {
   _applySparse(acc, data, numComponents, info) {
     const s = acc.sparse;
     const idxBv = this.json.bufferViews[s.indices.bufferView];
-    const idxBuf = this._buffers[idxBv.buffer];
+    const idxBuf = this._viewBuffer(s.indices.bufferView);
     const idxDv = new DataView(idxBuf.buffer);
     const idxReader = componentReader(idxDv, s.indices.componentType);
     const idxSize = COMPONENT_INFO[s.indices.componentType].size;
     const idxBase = idxBuf.byteOffset + (idxBv.byteOffset || 0) + (s.indices.byteOffset || 0);
 
     const valBv = this.json.bufferViews[s.values.bufferView];
-    const valBuf = this._buffers[valBv.buffer];
+    const valBuf = this._viewBuffer(s.values.bufferView);
     const valDv = new DataView(valBuf.buffer);
     const valReader = componentReader(valDv, acc.componentType);
     const valBase = valBuf.byteOffset + (valBv.byteOffset || 0) + (s.values.byteOffset || 0);
@@ -165,7 +190,12 @@ export class GltfAsset {
   imageBytes(index) {
     const img = this.json.images[index];
     if (img.bufferView !== undefined) {
-      return { bytes: this.bufferViewBytes(img.bufferView), mimeType: img.mimeType };
+      try {
+        return { bytes: this.bufferViewBytes(img.bufferView), mimeType: img.mimeType };
+      } catch (e) {
+        if (e instanceof DataUnavailableError) return null;
+        throw e;
+      }
     }
     if (img.uri && img.uri.startsWith("data:")) {
       const mimeType = img.uri.slice(5, img.uri.indexOf(";"));

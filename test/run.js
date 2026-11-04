@@ -192,6 +192,30 @@ assert(f.usda.includes('def Mesh "CubeC"') && f.usda.includes('def Xform "CubeC_
   assert(w.length === 0, `no warnings for skinned.glb: ${w}`);
 }
 
+// ---- Compressed data that cannot be decoded is skipped, not written as zeros ----
+{
+  const { gltf, resources } = buildCubeGltf();
+  // Draco without an uncompressed fallback: POSITION accessor has no bufferView.
+  const draco = JSON.parse(gltf);
+  draco.extensionsUsed = draco.extensionsRequired = ["KHR_draco_mesh_compression"];
+  draco.meshes[0].primitives[0].extensions = { KHR_draco_mesh_compression: { bufferView: 0, attributes: { POSITION: 0 } } };
+  delete draco.accessors[0].bufferView;
+  const w1 = [];
+  const d = glbToUsda(draco, { resources, onWarning: (m) => w1.push(m) }).usda;
+  assert(!d.includes("def Mesh") && w1.some((m) => m.includes("Draco-compressed") && m.includes("skipped")), `Draco without fallback skipped: ${w1}`);
+  // Draco with a fallback (accessors keep their bufferViews) converts normally.
+  const withFallback = JSON.parse(gltf);
+  withFallback.meshes[0].primitives[0].extensions = { KHR_draco_mesh_compression: { bufferView: 0, attributes: { POSITION: 0 } } };
+  assert(glbToUsda(withFallback, { resources }).usda === usda, "Draco with uncompressed fallback uses the fallback");
+  // EXT_meshopt_compression: the view's buffer is a data-less fallback.
+  const mo = JSON.parse(gltf);
+  mo.buffers.push({ byteLength: 288, extensions: { EXT_meshopt_compression: { fallback: true } } });
+  mo.bufferViews[0] = { ...mo.bufferViews[0], buffer: 1, extensions: { EXT_meshopt_compression: { buffer: 0, byteOffset: 0, byteLength: 10, byteStride: 12, count: 24, mode: "ATTRIBUTES" } } };
+  const w2 = [];
+  const m = glbToUsda(mo, { resources, onWarning: (x) => w2.push(x) }).usda;
+  assert(!m.includes("def Mesh") && w2.some((x) => x.includes("EXT_meshopt_compression") && x.includes("skipped")), `meshopt view skipped: ${w2}`);
+}
+
 // Cube has nothing to warn about.
 const cubeWarnings = [];
 glbToUsda(glb, { onWarning: (m) => cubeWarnings.push(m) });

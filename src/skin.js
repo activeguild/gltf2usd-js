@@ -17,6 +17,7 @@ import { IDENTITY, decompose, invert, isIdentity, multiply, nodeLocalMatrix, com
 import { sampleAt } from "./animation.js";
 import { Prim } from "./ir.js";
 import { sanitize, uniqueName } from "./names.js";
+import { DataUnavailableError } from "./glb.js";
 
 /**
  * @returns {Map<number, SkinPlan>} skin index → plan, for skins used by nodes in the scene
@@ -48,9 +49,18 @@ export function planSkins(ctx, sceneNodes) {
     if (node.skin === undefined || node.mesh === undefined) continue;
     const skin = json.skins[node.skin];
     if (!skin) continue;
-    if (!plans.has(node.skin)) plans.set(node.skin, buildPlan(ctx, node.skin, skin, parent, world));
-    plans.get(node.skin).users.push(nodeIndex);
+    if (!plans.has(node.skin)) {
+      try {
+        plans.set(node.skin, buildPlan(ctx, node.skin, skin, parent, world));
+      } catch (e) {
+        if (!(e instanceof DataUnavailableError)) throw e;
+        ctx.warn(`Skin ${node.skin} skipped (meshes written unskinned): ${e.message}`);
+        plans.set(node.skin, null);
+      }
+    }
+    plans.get(node.skin)?.users.push(nodeIndex);
   }
+  for (const [k, v] of plans) if (!v) plans.delete(k);
   return plans;
 }
 

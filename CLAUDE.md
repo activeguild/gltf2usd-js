@@ -75,13 +75,18 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
 - スキン → `/Root/Skins/<Skin>`（SkelRoot）に Skeleton / SkelAnimation / メッシュ。JOINTS_n / WEIGHTS_n すべて（elementSize = 4n）
 - モーフターゲット → Mesh 子の `BlendShape`（offsets / normalOffsets、疎なら pointIndices）。スキンなしのメッシュは
   ノードの下に専用 SkelRoot（ジョイント 0 個の Skeleton）。ウェイトは node.weights / mesh.weights と weights アニメーション
+- KHR_mesh_quantization（整数・正規化 accessor + ノード変換。gltf-transform で量子化した DamagedHelmet / CesiumMan を
+  three.js と比較して一致を確認）
 - KHR_materials_emissive_strength（emissiveColor に乗算）、KHR_materials_ior（`inputs:ior`）、
   KHR_materials_clearcoat（`inputs:clearcoat` / `clearcoatRoughness`、テクスチャは R / G。clearcoatNormal は警告）
 - `options.onWarning`: 未対応拡張、POINTS / LINES、POSITION なし、アニメーション / スキン / カメラ / モーフ、複数シーン、
   解決できない画像、PNG / JPEG 以外の画像、マテリアルが使う TEXCOORD_n が Mesh にない
 
 ### 未対応（既知）
-- KHR_materials_transmission / volume / specular / sheen / unlit など（警告）、KHR_mesh_quantization（normalized は読めるので一部は動く）
+- KHR_materials_transmission / volume / specular / sheen / unlit など（警告）
+- KHR_draco_mesh_compression: 非圧縮の fallback があればそれを使う。なければそのプリミティブをスキップして警告
+- EXT_meshopt_compression: 未デコード。fallback バッファしかない bufferView を読むと `DataUnavailableError` になり、
+  メッシュ / アニメーションのチャンネル / スキンの単位でスキップして警告（以前のように 0 埋めで壊れたメッシュは出さない）
 - POINTS / LINES プリミティブ（スキップして警告）
 - 2 本目以降のアニメーション（`options.animation` で 1 本選ぶ。警告あり）
 - ジョイントの間にある非ジョイントノードのアニメーション（警告）、morph target の TANGENT（警告）

@@ -9,6 +9,7 @@
 //   /Root/Materials/<Mat>     (Material + UsdPreviewSurface + UsdUVTexture shaders)
 
 import { Layer, Prim } from "./ir.js";
+import { DataUnavailableError } from "./glb.js";
 import { sanitize, uniqueName } from "./names.js";
 import { composeTRS } from "./math.js";
 
@@ -32,6 +33,9 @@ const SUPPORTED_EXTENSIONS = new Set([
   "KHR_materials_emissive_strength",
   "KHR_materials_ior",
   "KHR_materials_clearcoat",
+  // Quantized attributes are ordinary (normalized) integer accessors plus node transforms;
+  // verified against three.js with gltf-transform-quantized DamagedHelmet / CesiumMan.
+  "KHR_mesh_quantization",
 ]);
 
 /** USD primvar name for glTF TEXCOORD_n: st, st1, st2, ... */
@@ -284,7 +288,29 @@ function identityIfTrivial(m) {
 
 // ---------- Meshes ----------
 
+/**
+ * Build one Mesh prim, or skip it (with a warning) when its data cannot be read:
+ * Draco-compressed without an uncompressed fallback, or meshopt-compressed views.
+ */
 function buildMeshPrim(ctx, parent, prim, name, skel = null, gltfMesh = null) {
+  const positionAccessor = ctx.json.accessors?.[prim.attributes?.POSITION];
+  if (prim.extensions?.KHR_draco_mesh_compression && positionAccessor && positionAccessor.bufferView === undefined) {
+    ctx.warn(`Mesh "${name}" is Draco-compressed (KHR_draco_mesh_compression) with no uncompressed fallback; skipped`);
+    return;
+  }
+  const children = parent.children.length;
+  const shapes = skel?.shapes.length;
+  try {
+    buildMeshPrimData(ctx, parent, prim, name, skel, gltfMesh);
+  } catch (e) {
+    if (!(e instanceof DataUnavailableError)) throw e;
+    parent.children.length = children; // drop the partially built prim
+    if (skel) skel.shapes.length = shapes;
+    ctx.warn(`Mesh "${name}" skipped: ${e.message}`);
+  }
+}
+
+function buildMeshPrimData(ctx, parent, prim, name, skel, gltfMesh) {
   const mode = prim.mode ?? MODE_TRIANGLES;
   if (mode !== MODE_TRIANGLES && mode !== MODE_TRIANGLE_STRIP && mode !== MODE_TRIANGLE_FAN) {
     ctx.warn(`Primitive mode ${MODE_NAMES[mode] ?? mode} is not supported; skipped (mesh "${name}")`);
