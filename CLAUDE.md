@@ -215,6 +215,10 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
    sparse / indices / values はオブジェクト、sparse の indices は GltfAsset の生成時に読んで、昇順・重複なし・count 未満を確認する
    （どこからも読まれない accessor でも検出する。meshopt で読めない view は読むときに確認）。
    以前は警告して正規化していた「normalized のない整数の COLOR_0」も、この規則でエラーになった。
+   EXT_mesh_gpu_instancing: node.extensions / 拡張 / attributes はオブジェクト（attributes は必須）。TRANSLATION / SCALE は VEC3、
+   ROTATION は VEC4。componentType は FLOAT（ROTATION は拡張の仕様どおり normalized BYTE / SHORT も可、TRANSLATION / SCALE は
+   KHR_mesh_quantization が宣言されていれば整数も可）。全属性の count は同じ（`gpuInstanceCount()` の `Math.min()` による切り詰めは廃止し、
+   検証をすり抜けた不一致はエラー）。インスタンス属性の accessor の byteOffset は 4 の倍数（byteStride 付きの bufferView は可）。
    JSON の型: トップレベル配列の要素・primitive・target・sampler・channel はオブジェクト、children / scene.nodes / samplers / channels /
    primitives / targets は配列（標準の TypeError を出さない）。
    `DEFAULT_LIMITS` はメモリとスタックを守るためだけのもの（入力 2 GiB、accessor 1 本 2^26 値、ノードの深さ 1024 など）。

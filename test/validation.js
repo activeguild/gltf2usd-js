@@ -397,6 +397,95 @@ rejects(withJson((j) => { j.meshes[0].primitives.push({ attributes: {} }); }), /
   assert(usda.includes("primvars:st") && usda.includes("primvars:displayColor"), "aligned accessors convert");
 }
 
+// ---- EXT_mesh_gpu_instancing ----
+{
+  const z = (type, count = 2, componentType = 5126, extra = {}) => ({ componentType, count, type, ...extra });
+  /** Triangle node instanced with the given attributes (name → accessor JSON, or a raw index). */
+  const instanced = (attrs, { quantization = false, mutate } = {}) => withJson((j) => {
+    j.extensionsUsed = ["EXT_mesh_gpu_instancing", ...(quantization ? ["KHR_mesh_quantization"] : [])];
+    const attributes = {};
+    for (const [name, acc] of Object.entries(attrs)) {
+      if (typeof acc === "number") { attributes[name] = acc; continue; }
+      j.accessors.push(acc);
+      attributes[name] = j.accessors.length - 1;
+    }
+    j.nodes[0].extensions = { EXT_mesh_gpu_instancing: { attributes } };
+    mutate?.(j);
+  });
+  const W = "node 0 EXT_mesh_gpu_instancing";
+  // Accessor references.
+  rejects(instanced({ TRANSLATION: 9 }), new RegExp(`${W}: TRANSLATION accessor 9 does not exist`), "TRANSLATION accessor out of range");
+  rejects(instanced({ ROTATION: 7 }), new RegExp(`${W}: ROTATION accessor 7 does not exist`), "ROTATION accessor out of range");
+  rejects(instanced({ SCALE: 5 }), new RegExp(`${W}: SCALE accessor 5 does not exist`), "SCALE accessor out of range");
+  rejects(instanced({ SCALE: -1 }), /SCALE accessor -1 does not exist/, "negative accessor index");
+  rejects(instanced({ TRANSLATION: 0.5 }), /TRANSLATION accessor 0.5 does not exist/, "fractional accessor index");
+  // Types.
+  rejects(instanced({ TRANSLATION: z("VEC2") }), new RegExp(`${W}: TRANSLATION \\(accessor 2\\) must be VEC3, not VEC2`), "TRANSLATION VEC2");
+  rejects(instanced({ ROTATION: z("VEC3") }), /ROTATION \(accessor 2\) must be VEC4, not VEC3/, "ROTATION VEC3");
+  rejects(instanced({ SCALE: z("VEC4") }), /SCALE \(accessor 2\) must be VEC3, not VEC4/, "SCALE VEC4");
+  // Component types other than FLOAT (and the extension's normalized ROTATION forms).
+  rejects(instanced({ TRANSLATION: z("VEC3", 2, 5122, { normalized: true }) }), /TRANSLATION \(accessor 2\) is normalized SHORT \(allowed only with KHR_mesh_quantization\); allowed: FLOAT/, "normalized SHORT TRANSLATION");
+  rejects(instanced({ SCALE: z("VEC3", 2, 5125) }), /SCALE \(accessor 2\) is UNSIGNED_INT; allowed: FLOAT/, "UNSIGNED_INT SCALE");
+  rejects(instanced({ ROTATION: z("VEC4", 2, 5121, { normalized: true }) }), /ROTATION \(accessor 2\) is normalized UNSIGNED_BYTE; allowed: FLOAT, normalized BYTE, normalized SHORT/, "normalized UNSIGNED_BYTE ROTATION");
+  rejects(instanced({ ROTATION: z("VEC4", 2, 5122) }), /ROTATION \(accessor 2\) is SHORT; allowed: FLOAT, normalized BYTE, normalized SHORT/, "unnormalized SHORT ROTATION");
+  // Counts.
+  rejects(instanced({ TRANSLATION: z("VEC3", 3), ROTATION: z("VEC4", 2) }), new RegExp(`${W}: ROTATION \\(accessor 3\\) has 2 instances, TRANSLATION has 3`), "TRANSLATION / ROTATION count mismatch");
+  rejects(instanced({ TRANSLATION: z("VEC3", 3), SCALE: z("VEC3", 4) }), /SCALE \(accessor 3\) has 4 instances, TRANSLATION has 3/, "TRANSLATION / SCALE count mismatch");
+  // Structure.
+  rejects(withJson((j) => { j.nodes[0].extensions = { EXT_mesh_gpu_instancing: { attributes: null } }; }), new RegExp(`${W}: attributes must be an object`), "attributes null");
+  rejects(withJson((j) => { j.nodes[0].extensions = { EXT_mesh_gpu_instancing: { attributes: [0] } }; }), /attributes must be an object/, "attributes array");
+  rejects(withJson((j) => { j.nodes[0].extensions = { EXT_mesh_gpu_instancing: {} }; }), new RegExp(`${W}: attributes is required`), "attributes missing");
+  rejects(withJson((j) => { j.nodes[0].extensions = { EXT_mesh_gpu_instancing: 3 }; }), /node 0 extensions: EXT_mesh_gpu_instancing must be an object/, "extension not an object");
+  rejects(withJson((j) => { j.nodes[0].extensions = "EXT_mesh_gpu_instancing"; }), /node 0: extensions must be an object/, "extensions a string");
+  rejects(withJson((j) => { j.nodes[0].extensions = [{}]; }), /node 0: extensions must be an object/, "extensions an array");
+  rejects(withJson((j) => { j.nodes[0].extensions = null; }), /node 0: extensions must be an object/, "extensions null");
+  // Alignment: a FLOAT instance attribute at byteOffset 2 (component-size rule) — and the 4-byte rule.
+  rejects(instanced({ TRANSLATION: { bufferView: 0, componentType: 5126, count: 2, type: "VEC3", byteOffset: 2 } }), /accessor 2 byteOffset 2 is not a multiple of its component size 4/, "misaligned FLOAT TRANSLATION");
+  rejects(instanced({ ROTATION: { bufferView: 0, componentType: 5122, normalized: true, count: 2, type: "VEC4", byteOffset: 2 } }), /accessor 2 is an EXT_mesh_gpu_instancing attribute; its byteOffset 2 must be a multiple of 4/, "normalized SHORT ROTATION at byteOffset 2");
+
+  // Valid cases: the number of instance Xforms equals the count; omitted attributes are identity.
+  const instances = (usda) => (usda.match(/def Xform "Tri_\d+"/g) || []).length;
+  const tOnly = accepts(instanced({ TRANSLATION: z("VEC3", 3) }), "TRANSLATION only");
+  assert(instances(tOnly) === 3, `TRANSLATION only: ${instances(tOnly)} instances`);
+  assert(instances(accepts(instanced({ ROTATION: z("VEC4", 2) }), "ROTATION only")) === 2, "ROTATION only: 2 instances");
+  assert(instances(accepts(instanced({ SCALE: z("VEC3", 4) }), "SCALE only")) === 4, "SCALE only: 4 instances");
+  assert(instances(accepts(instanced({ TRANSLATION: z("VEC3", 5), ROTATION: z("VEC4", 5), SCALE: z("VEC3", 5) }), "all three")) === 5, "all three, same count: 5 instances");
+  assert(instances(accepts(instanced({ TRANSLATION: z("VEC3", 2), SCALE: z("VEC3", 2) }), "no ROTATION")) === 2, "ROTATION omitted");
+  assert(instances(accepts(instanced({ ROTATION: z("VEC4", 2), SCALE: z("VEC3", 2) }), "no TRANSLATION")) === 2, "TRANSLATION omitted");
+  assert(instances(accepts(instanced({ TRANSLATION: z("VEC3", 2), ROTATION: z("VEC4", 2) }), "no SCALE")) === 2, "SCALE omitted");
+  assert(instances(accepts(instanced({ ROTATION: z("VEC4", 2, 5120, { normalized: true }) }), "normalized BYTE ROTATION")) === 2, "normalized BYTE ROTATION (extension spec)");
+  assert(instances(accepts(instanced({ TRANSLATION: z("VEC3", 2, 5122) }, { quantization: true }), "quantized TRANSLATION")) === 2, "SHORT TRANSLATION with KHR_mesh_quantization");
+  // The instanced mesh is also used by a plain node: one prototype, referenced by every
+  // GPU instance and by the plain node (instancing on), or copies (instancing: false).
+  {
+    const shared = instanced({ TRANSLATION: z("VEC3", 3) }, { mutate: (j) => { j.nodes.push({ name: "Plain", mesh: 0 }); j.scenes[0].nodes.push(1); } });
+    const usda = accepts(shared, "instanced + shared mesh");
+    const count = (sub) => usda.split(sub).length - 1;
+    assert(count('def Mesh "Tri"') === 1 && count("prepend references = </Root/Meshes/Tri>") === 4 && count("instanceable = true") === 4,
+      `GPU instances + plain node share one prototype: ${count('def Mesh "Tri"')} meshes, ${count("prepend references = </Root/Meshes/Tri>")} references`);
+    const flat = glbToUsda(shared, { instancing: false }).usda;
+    assert(flat.split('def Mesh "Tri"').length - 1 === 4 && !flat.includes("instanceable"), "instancing: false copies the mesh per instance and node");
+  }
+  // Omitted ROTATION / SCALE give an identity rotation and unit scale (only the translation moves).
+  {
+    const { bin: tb, views } = (() => {
+      const t = new Float32Array([1, 0, 0, 0, 2, 0]);
+      const out = new Uint8Array(bin.length + t.byteLength);
+      out.set(bin); out.set(new Uint8Array(t.buffer), bin.length);
+      return { bin: out, views: { buffer: 0, byteOffset: bin.length, byteLength: t.byteLength } };
+    })();
+    const j = clone(json);
+    j.buffers[0].byteLength = tb.length;
+    j.bufferViews.push(views);
+    j.accessors.push({ bufferView: 2, componentType: 5126, count: 2, type: "VEC3" });
+    j.nodes[0].extensions = { EXT_mesh_gpu_instancing: { attributes: { TRANSLATION: 2 } } };
+    const usda = accepts(makeGlb(j, tb), "translation values");
+    const m = usda.match(/xformOp:transform = .*/g) || [];
+    assert(m.length === 2 && m[0].endsWith("( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (1, 0, 0, 1) )") && m[1].endsWith("( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 2, 0, 1) )"),
+      `instance matrices (identity rotation / unit scale, translated): ${m}`);
+  }
+}
+
 // No internal TypedArray / DataView errors escape for any single-byte corruption of the
 // header and JSON-chunk header: every failure is a GltfValidationError.
 for (let i = 0; i < 20; i++) {

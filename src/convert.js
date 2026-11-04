@@ -378,12 +378,17 @@ function overAt(body, path) {
   return prim;
 }
 
-/** Instances drawn by a node: EXT_mesh_gpu_instancing's attribute count, else 1. */
+/**
+ * Instances drawn by a node: EXT_mesh_gpu_instancing's attribute count, else 1.
+ * validate.js guarantees one count for all attributes; a mismatch here (input that
+ * bypassed validation) is an error, never a silent truncation to the shortest.
+ */
 function gpuInstanceCount(ctx, node) {
   const attrs = node.extensions?.EXT_mesh_gpu_instancing?.attributes;
   if (!attrs) return 1;
-  const counts = ["TRANSLATION", "ROTATION", "SCALE"].map((k) => ctx.json.accessors?.[attrs[k]]?.count).filter((c) => c !== undefined);
-  return counts.length ? Math.min(...counts) : 1;
+  const counts = new Set(Object.values(attrs).map((a) => ctx.json.accessors[a].count));
+  if (counts.size > 1) throw new GltfValidationError(`EXT_mesh_gpu_instancing attributes have different counts (${[...counts].join(", ")})`);
+  return counts.size ? [...counts][0] : 1;
 }
 
 /**

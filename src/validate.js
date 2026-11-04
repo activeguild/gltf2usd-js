@@ -100,6 +100,13 @@ const TARGET_RULES = [
   { re: /^TEXCOORD_\d+$/, types: ["VEC2"], core: [[FLOAT, "f"]], quantized: [[BYTE, "n"], [BYTE, "i"], [UBYTE, "n"], [UBYTE, "i"], [SHORT, "n"], [SHORT, "i"], [USHORT, "n"], [USHORT, "i"]] },
   { re: /^COLOR_\d+$/, types: ["VEC3", "VEC4"], core: [[FLOAT, "f"]], quantized: [[BYTE, "n"], [BYTE, "i"], [UBYTE, "n"], [UBYTE, "i"], [SHORT, "n"], [SHORT, "i"], [USHORT, "n"], [USHORT, "i"]] },
 ];
+// EXT_mesh_gpu_instancing per-instance attributes: FLOAT, ROTATION also normalized BYTE / SHORT
+// (the extension's own table), TRANSLATION / SCALE also the KHR_mesh_quantization integers.
+const INSTANCE_RULES = [
+  { re: /^TRANSLATION$/, types: ["VEC3"], core: [[FLOAT, "f"]], quantized: ANY_INT },
+  { re: /^ROTATION$/, types: ["VEC4"], core: [[FLOAT, "f"], [BYTE, "n"], [SHORT, "n"]], quantized: [] },
+  { re: /^SCALE$/, types: ["VEC3"], core: [[FLOAT, "f"]], quantized: ANY_INT },
+];
 const COMPONENT_NAME = { [BYTE]: "BYTE", [UBYTE]: "UNSIGNED_BYTE", [SHORT]: "SHORT", [USHORT]: "UNSIGNED_SHORT", 5125: "UNSIGNED_INT", [FLOAT]: "FLOAT" };
 const formName = ([ct, kind]) => `${kind === "n" ? "normalized " : ""}${COMPONENT_NAME[ct]}`;
 
@@ -312,6 +319,7 @@ export function validateDocument(json, limits) {
   });
 
   // Nodes: references, and a forest (one parent per node, no cycles, bounded depth).
+  const instanceUse = new Set(); // EXT_mesh_gpu_instancing accessors (alignment below)
   const parentOf = new Map();
   nodes.forEach((node, i) => {
     const where = `node ${i}`;
@@ -327,12 +335,22 @@ export function validateDocument(json, limits) {
       if (c === i) fail(`${where} lists itself as a child`);
       parentOf.set(c, i);
     }
-    const inst = node.extensions?.EXT_mesh_gpu_instancing?.attributes;
-    let instances;
-    for (const [name, a] of Object.entries(inst || {})) {
-      ref(a, accessors, `EXT_mesh_gpu_instancing ${name} accessor`, where);
-      instances ??= accessors[a].count;
-      if (accessors[a].count !== instances) fail(`${where}: EXT_mesh_gpu_instancing attributes have different counts (${name}: ${accessors[a].count}, expected ${instances})`);
+    // EXT_mesh_gpu_instancing: objects all the way down, valid accessors of the right type,
+    // one count for every attribute (the converter draws exactly that many instances).
+    const extensions = object(node, "extensions", where);
+    if (extensions.EXT_mesh_gpu_instancing !== undefined) {
+      const ext = object(extensions, "EXT_mesh_gpu_instancing", `${where} extensions`);
+      const iw = `${where} EXT_mesh_gpu_instancing`;
+      if (ext.attributes === undefined) fail(`${iw}: attributes is required`);
+      const attrs = object(ext, "attributes", iw);
+      let instances, first;
+      for (const [name, a] of Object.entries(attrs)) {
+        ref(a, accessors, `${name} accessor`, iw);
+        checkAttribute(INSTANCE_RULES, name, accessors[a], `${iw}: ${name} (accessor ${a})`, quantization, fail);
+        instanceUse.add(a);
+        if (instances === undefined) { instances = accessors[a].count; first = name; }
+        if (accessors[a].count !== instances) fail(`${iw}: ${name} (accessor ${a}) has ${accessors[a].count} instances, ${first} has ${instances} (all attributes must have the same count)`);
+      }
     }
   });
   const depth = new Map();
@@ -422,6 +440,9 @@ export function validateDocument(json, limits) {
       fail(`${where}: bufferView ${acc.bufferView} byteOffset ${bv.byteOffset ?? 0} + accessor byteOffset ${own} is not a multiple of its component size ${cs}`);
     }
     if (vertexUse.has(i) && own % 4) fail(`${where} is a vertex attribute; its byteOffset ${own} must be a multiple of 4`);
+    // Per-instance attributes are attribute-like data (every allowed type is ≥ 4 bytes per
+    // element): 4-byte aligned like vertex attributes; a strided bufferView is allowed.
+    if (instanceUse.has(i) && own % 4) fail(`${where} is an EXT_mesh_gpu_instancing attribute; its byteOffset ${own} must be a multiple of 4`);
     if (otherUse.has(i) && !vertexUse.has(i) && bv.byteStride !== undefined) {
       fail(`${where} (${otherUse.get(i)}) uses bufferView ${acc.bufferView}, which defines byteStride; only vertex attributes may use a strided bufferView`);
     }

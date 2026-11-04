@@ -138,7 +138,7 @@ GLB を選ぶかドロップすると（またはサンプルボタンで）、�
   （壊れた zip を作らないため。ZIP64 は Quick Look などの対応が不確かなので実装していない）。
 - **入力の検証**: データを読む・シーンをたどるのに使う参照とバイト範囲（buffer / bufferView / accessor / mesh / node / skin /
   animation）、頂点属性の要素数・type・componentType（KHR_mesh_quantization の整数型は宣言されているときだけ）、JOINTS_n / WEIGHTS_n の対、
-  POSITION の有無、インデックス（型・値の範囲・TRIANGLES は 3 の倍数）、sparse の構造と昇順、accessor / sparse のアライメントと byteStride の使い方、
+  POSITION の有無、EXT_mesh_gpu_instancing の属性（型・count の一致・構造）、インデックス（型・値の範囲・TRIANGLES は 3 の倍数）、sparse の構造と昇順、accessor / sparse のアライメントと byteStride の使い方、
   JSON の型（配列・オブジェクト）は変換前にすべて検査し、不正なら `GltfValidationError`（何番の何が不正かをメッセージに入れる）。0 埋めや切り詰めで
   変換を続けることはしない。マテリアル / テクスチャ / 画像 / ライト / バリアントの不正な参照は、従来どおりその参照を無視して警告する
   （見た目のデータで、無くても形は正しく出せるため）。アニメーションのキーが壊れている（時刻が減る、NaN、個数が合わない）チャンネルは
