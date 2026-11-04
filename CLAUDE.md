@@ -221,6 +221,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
    UsdUVTexture にはフィルタの指定がない（Nearest を指定できない）ので、線形補間で階段の 2 テクセルの間に中間の値が出る。
    その帯を狭くするため階段は 4096 テクセル（BLEND の 256 テクセルの 1/16 の幅）にし、帯の中央を cutoff / factor.a に合わせて
    `opacityThreshold = 0.5` で切る。`test/color.js` で線形補間を再現して、glTF の判定と食い違うのが切れ目の 1 テクセル以内だけであることを確認。
+   iOS の Quick Look でも、アルファ 0.45 → 0.55 の横長の板（mask-edge.usdz）で、256 テクセルでは境目に見えた半透明の帯が 4096 テクセルでは見えないことを確認済み。
    BLEND のランプも MASK の階段も、iOS の Quick Look で glTF どおりに表示されることを確認済み（vertex-alpha.usdz の A / B / C）。
 21. **USDZ の ZIP 上限は書く前に検査する。** `planLayout()` が長さだけから全オフセットを計算し、32 / 16 ビットのフィールドに収まらなければ
    `UsdzLimitError`（"USDZ exceeds supported ZIP size limits"）。エントリ名は相対・スラッシュ区切り・`.` `..` 空セグメントなし・
