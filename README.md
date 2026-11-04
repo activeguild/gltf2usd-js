@@ -62,7 +62,7 @@ GLB を選ぶかドロップすると（またはサンプルボタンで）、�
 | `src/index.js`| 公開 API |
 | `demo/`       | ブラウザ用テストアプリ（`npm run demo`） |
 
-## 現在対応しているもの（段階 1）
+## 現在対応しているもの（段階 1・2）
 
 - GLB ヘッダ / JSON / BIN チャンク、data URI バッファ
 - `.gltf` と外部 `.bin` / 画像（`options.resources`）

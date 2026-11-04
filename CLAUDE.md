@@ -8,10 +8,10 @@ Node 固有 API（`fs`, `Buffer`）は `cli.js` と `test/` の中だけで使�
 
 npm パッケージ名: `gltf2usd-js`。
 
-## 現在の状態（段階 1 完了、段階 2 進行中）
+## 現在の状態（段階 1・2 完了。KHR_materials_transmission の扱いのみ要相談）
 
-`src/` 4 ファイル、合計 ~600 行。テスト GLB（テクスチャ付きキューブ + TRS 付き子ノード）を
-OpenUSD 26.11 の全 30 バリデータに通して error 0 を確認済み。
+`src/` 4 ファイル、合計 ~1000 行。テスト GLB（`cube.glb`、段階 2 の機能を詰めた `features.glb`、外部ファイル付き `gltf/cube.gltf`）と
+Khronos サンプル（BoxTextured / CesiumMilkTruck / DamagedHelmet）を OpenUSD 26.11 の全 30 バリデータに通して error 0 を確認済み。
 
 | ファイル | 役割 | 備考 |
 |---|---|---|
@@ -105,6 +105,7 @@ node cli.js test/cube.glb /tmp/cube.usdz
 pip install usd-core --break-system-packages   # 初回のみ
 python3 test/validate.py /tmp/cube.usdz    # "0 validation error(s)" を確認
 node cli.js test/features.glb /tmp/features.usdz && python3 test/validate.py /tmp/features.usdz
+node cli.js test/gltf/cube.gltf /tmp/cube-gltf.usdz && python3 test/validate.py /tmp/cube-gltf.usdz
 npm run demo                               # 見た目の確認: サンプルと fixtures の GLB を左右で比較
 ```
 
