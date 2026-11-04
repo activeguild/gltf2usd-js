@@ -52,6 +52,12 @@ const VERTEX_ALPHA_UV = "vertexAlphaUV";
 const RAMP_SIZE = 256;
 /** u of a ramp texel center for alpha a, so linear filtering returns a. */
 const rampU = (a) => (0.5 + Math.min(1, Math.max(0, a)) * (RAMP_SIZE - 1)) / RAMP_SIZE;
+// MASK step ramps are wider: UsdUVTexture has no filter setting (Nearest cannot be asked
+// for), so linear filtering blends the two texels at the step. 4096 texels make that band
+// 1/16 of a BLEND-ramp texel, and the cut sits at the band's middle (opacity threshold 0.5).
+const MASK_RAMP_SIZE = 4096;
+/** First opaque texel of the MASK step ramp for COLOR_0.a ≥ limit (midpoint of the band = limit). */
+const maskStep = (limit) => Math.min(MASK_RAMP_SIZE, Math.max(0, Math.round(rampU(limit) * MASK_RAMP_SIZE)));
 
 /**
  * @param {import("./glb.js").GltfAsset} asset
@@ -532,7 +538,8 @@ function buildMeshPrimData(ctx, parent, prim, name, skel, gltfMesh) {
   }
 
   const pos = ctx.asset.accessor(attrs.POSITION);
-  const indices = buildTriangleIndices(ctx, prim, mode, pos.count);
+  const where = `mesh ${ctx.json.meshes.indexOf(gltfMesh)} primitive ${gltfMesh.primitives.indexOf(prim)}`;
+  const indices = buildTriangleIndices(ctx, prim, mode, pos.count, where);
   const triCount = indices.length / 3;
 
   const hasMaterial = prim.material !== undefined && ctx.json.materials?.[prim.material];
@@ -707,9 +714,10 @@ function displayOpacity(ctx, prim, alpha) {
 
 /**
  * The ramp texture for vertex alpha, packaged once per kind: a linear ramp (gray = alpha
- * = x / 255) for BLEND, or for MASK a step that is 0 below texel `step` and 1 from it on.
- * Quick Look draws MASK fragments above the threshold with their partial opacity (seen as
- * a fade inside the cut-out), while glTF draws them opaque; a 0 / 1 ramp makes both agree.
+ * = x / 255, RAMP_SIZE texels) for BLEND, or for MASK a MASK_RAMP_SIZE-texel step that is
+ * 0 below texel `step` and 1 from it on. Quick Look draws MASK fragments above the threshold
+ * with their partial opacity (seen as a fade inside the cut-out), while glTF draws them
+ * opaque; a 0 / 1 ramp makes both agree except within the filtered band at the step.
  */
 function vertexAlphaRampFile(ctx, step = null) {
   const key = step === null ? "ramp" : `step_${step}`;
@@ -719,8 +727,10 @@ function vertexAlphaRampFile(ctx, step = null) {
   let name = `${ctx.texturePrefix}${base}.png`;
   for (let i = 1; ctx.usedFileNames.has(name.toLowerCase()); i++) name = `${ctx.texturePrefix}${base}_${i}.png`;
   ctx.usedFileNames.add(name.toLowerCase());
-  const pixel = step === null ? (x) => [x, x] : (x) => (x >= step ? [255, 255] : [0, 0]);
-  ctx.files.push({ name, bytes: encodeGrayAlphaPng(RAMP_SIZE, 1, pixel) });
+  const bytes = step === null
+    ? encodeGrayAlphaPng(RAMP_SIZE, 1, (x) => [x, x])
+    : encodeGrayAlphaPng(MASK_RAMP_SIZE, 1, (x) => (x >= step ? [255, 255] : [0, 0]));
+  ctx.files.push({ name, bytes });
   ctx.rampFiles.set(key, name);
   return name;
 }
@@ -764,10 +774,15 @@ function buildDefaultMaterial(scope, name) {
   surface.attr("token", "outputs:surface");
 }
 
-function buildTriangleIndices(ctx, prim, mode, vertexCount) {
+function buildTriangleIndices(ctx, prim, mode, vertexCount, where) {
   let idx;
   if (prim.indices !== undefined) {
     idx = ctx.asset.accessor(prim.indices).data;
+    // Index values are only known after decoding (sparse / meshopt), so they are checked here.
+    const bad = idx.findIndex((v) => v >= vertexCount);
+    if (bad >= 0) {
+      throw new GltfValidationError(`${where}: indices (accessor ${prim.indices}) value ${bad} is ${idx[bad]}, but POSITION has ${vertexCount} vertices`);
+    }
   } else {
     idx = Array.from({ length: vertexCount }, (_, i) => i);
   }
@@ -835,16 +850,18 @@ function buildMaterial(ctx, scope, mat, index) {
   const connect = (shader, output) => ({ connect: `${path}/${shader}.outputs:${output}` });
   // Opacity without a base color texture: the factor, or vertex alpha × factor through
   // the ramp texture (see planVertexAlpha).
+  let threshold = mat.alphaCutoff ?? 0.5; // MASK; the vertex alpha step ramp uses 0.5
   const constantOpacity = () => {
     if (alphaMode === "OPAQUE") return;
     if (ctx.vertexAlphaMaterials.has(index)) {
       // BLEND: ramp × factor.a. MASK: glTF keeps a fragment when COLOR_0.a × factor.a ≥ cutoff,
-      // i.e. COLOR_0.a ≥ cutoff / factor.a: the first opaque texel of a 0 / 1 step ramp.
+      // i.e. COLOR_0.a ≥ cutoff / factor.a: a 0 / 1 step ramp, cut at its middle (0.5).
       let file, scale = [1, 1, 1, baseColor[3]];
       if (alphaMode === "MASK") {
         const limit = baseColor[3] > 0 ? (mat.alphaCutoff ?? 0.5) / baseColor[3] : Infinity;
-        file = vertexAlphaRampFile(ctx, Math.min(RAMP_SIZE, Math.max(0, Math.ceil(limit * (RAMP_SIZE - 1) - 1e-6))));
+        file = vertexAlphaRampFile(ctx, limit > 1 ? MASK_RAMP_SIZE : maskStep(limit));
         scale = [1, 1, 1, 1];
+        threshold = 0.5;
       } else {
         file = vertexAlphaRampFile(ctx);
       }
@@ -879,7 +896,7 @@ function buildMaterial(ctx, scope, mat, index) {
       surface.attr("color3f", "inputs:emissiveColor", baseColor.slice(0, 3));
       constantOpacity();
     }
-    if (alphaMode === "MASK") surface.attr("float", "inputs:opacityThreshold", mat.alphaCutoff ?? 0.5);
+    if (alphaMode === "MASK") surface.attr("float", "inputs:opacityThreshold", threshold);
     surface.attr("float", "inputs:metallic", 0);
     surface.attr("float", "inputs:roughness", 1);
     surface.attr("float", "inputs:ior", 1);
@@ -894,7 +911,7 @@ function buildMaterial(ctx, scope, mat, index) {
       surface.attr("color3f", "inputs:diffuseColor", baseColor.slice(0, 3));
       constantOpacity();
     }
-    if (alphaMode === "MASK") surface.attr("float", "inputs:opacityThreshold", mat.alphaCutoff ?? 0.5);
+    if (alphaMode === "MASK") surface.attr("float", "inputs:opacityThreshold", threshold);
 
     // Metallic / roughness (glTF packs: G = roughness, B = metallic)
     const mrTex = textureFile(ctx, pbr.metallicRoughnessTexture);

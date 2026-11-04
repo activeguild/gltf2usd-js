@@ -72,6 +72,15 @@ export function elementLayout(componentType, type) {
 }
 
 const isIndex = (v) => Number.isInteger(v) && v >= 0;
+const isObject = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+
+// Vertex attributes whose count must equal POSITION's (custom "_NAME" attributes are not checked).
+const VERTEX_ATTRIBUTE = /^(POSITION|NORMAL|TANGENT|TEXCOORD_\d+|COLOR_\d+|JOINTS_\d+|WEIGHTS_\d+)$/;
+const INDEX_TYPES = new Set([5121, 5123, 5125]);
+const MODE_TRIANGLES = 4;
+// Top-level arrays whose elements the converter reads as objects.
+const OBJECT_ARRAYS = ["accessors", "animations", "buffers", "bufferViews", "cameras", "images", "materials",
+  "meshes", "nodes", "samplers", "scenes", "skins", "textures"];
 
 /**
  * Validate a glTF JSON document (structure, references, byte ranges against the
@@ -91,6 +100,24 @@ export function validateDocument(json, limits) {
     if (limit !== undefined && v.length > limits[limit]) {
       fail(`glTF has ${v.length} ${name}, more than limits.${limit} (${limits[limit]})`);
     }
+    return v;
+  };
+  // Every element of the top-level arrays is an object (so property access cannot throw).
+  for (const name of OBJECT_ARRAYS) {
+    arr(name).forEach((v, i) => { if (!isObject(v)) fail(`glTF ${name}[${i}] must be an object`); });
+  }
+  /** An optional array property: [] when absent, GltfValidationError when not an array. */
+  const list = (owner, key, where) => {
+    const v = owner[key];
+    if (v === undefined) return [];
+    if (!Array.isArray(v)) fail(`${where}: ${key} must be an array`);
+    return v;
+  };
+  /** An optional object property: {} when absent, GltfValidationError when not an object. */
+  const object = (owner, key, where) => {
+    const v = owner[key];
+    if (v === undefined) return {};
+    if (!isObject(v)) fail(`${where}: ${key} must be an object`);
     return v;
   };
   const buffers = arr("buffers", "maxBuffers");
@@ -176,15 +203,44 @@ export function validateDocument(json, limits) {
     }
   });
 
-  // Meshes
+  // Meshes: references, vertex counts, index accessors, triangle counts.
   meshes.forEach((mesh, mi) => {
-    if (!Array.isArray(mesh?.primitives)) fail(`mesh ${mi}: primitives must be an array`);
+    if (!Array.isArray(mesh.primitives)) fail(`mesh ${mi}: primitives must be an array`);
     mesh.primitives.forEach((p, pi) => {
       const where = `mesh ${mi} primitive ${pi}`;
-      for (const [name, a] of Object.entries(p?.attributes || {})) ref(a, accessors, `${name} accessor`, where);
-      if (p.indices !== undefined) ref(p.indices, accessors, "indices accessor", where);
-      (p.targets || []).forEach((t, ti) => {
-        for (const [name, a] of Object.entries(t || {})) ref(a, accessors, `target ${ti} ${name} accessor`, where);
+      if (!isObject(p)) fail(`${where} must be an object`);
+      const attributes = object(p, "attributes", where);
+      for (const [name, a] of Object.entries(attributes)) ref(a, accessors, `${name} accessor`, where);
+      const mode = p.mode ?? MODE_TRIANGLES;
+      if (!(Number.isInteger(mode) && mode >= 0 && mode <= 6)) fail(`${where}: mode ${JSON.stringify(p.mode)} is not a glTF primitive mode (0..6)`);
+      // All vertex attributes have one element per vertex (POSITION's count).
+      const position = attributes.POSITION !== undefined ? accessors[attributes.POSITION] : null;
+      const vertexCount = position?.count;
+      if (position) {
+        for (const [name, a] of Object.entries(attributes)) {
+          if (VERTEX_ATTRIBUTE.test(name) && accessors[a].count !== vertexCount) {
+            fail(`${where}: ${name} (accessor ${a}) has ${accessors[a].count} elements, POSITION (accessor ${attributes.POSITION}) has ${vertexCount}`);
+          }
+        }
+      }
+      if (p.indices !== undefined) {
+        const idx = ref(p.indices, accessors, "indices accessor", where);
+        const label = `${where}: indices (accessor ${p.indices})`;
+        if (idx.type !== "SCALAR") fail(`${label} must be SCALAR, not ${idx.type}`);
+        if (!INDEX_TYPES.has(idx.componentType)) fail(`${label} componentType ${idx.componentType} must be 5121, 5123 or 5125`);
+        if (idx.normalized) fail(`${label} must not be normalized`);
+        if (mode === MODE_TRIANGLES && idx.count % 3) fail(`${label} has ${idx.count} indices, not a multiple of 3 (TRIANGLES)`);
+      } else if (mode === MODE_TRIANGLES && position && vertexCount % 3) {
+        fail(`${where}: ${vertexCount} vertices without indices, not a multiple of 3 (TRIANGLES)`);
+      }
+      list(p, "targets", where).forEach((t, ti) => {
+        if (!isObject(t)) fail(`${where} target ${ti} must be an object`);
+        for (const [name, a] of Object.entries(t)) {
+          ref(a, accessors, `target ${ti} ${name} accessor`, where);
+          if (position && accessors[a].count !== vertexCount) {
+            fail(`${where} target ${ti}: ${name} (accessor ${a}) has ${accessors[a].count} elements, POSITION has ${vertexCount}`);
+          }
+        }
       });
     });
   });
@@ -199,14 +255,19 @@ export function validateDocument(json, limits) {
       ref(node.skin, skins, "skin", where);
       if (node.mesh === undefined) fail(`${where}: has a skin but no mesh`);
     }
-    for (const c of node.children || []) {
+    for (const c of list(node, "children", where)) {
       ref(c, nodes, "child node", where);
       if (parentOf.has(c)) fail(`${where}: node ${c} already has parent node ${parentOf.get(c)} (glTF nodes form a forest)`);
       if (c === i) fail(`${where} lists itself as a child`);
       parentOf.set(c, i);
     }
     const inst = node.extensions?.EXT_mesh_gpu_instancing?.attributes;
-    for (const [name, a] of Object.entries(inst || {})) ref(a, accessors, `EXT_mesh_gpu_instancing ${name} accessor`, where);
+    let instances;
+    for (const [name, a] of Object.entries(inst || {})) {
+      ref(a, accessors, `EXT_mesh_gpu_instancing ${name} accessor`, where);
+      instances ??= accessors[a].count;
+      if (accessors[a].count !== instances) fail(`${where}: EXT_mesh_gpu_instancing attributes have different counts (${name}: ${accessors[a].count}, expected ${instances})`);
+    }
   });
   const depth = new Map();
   for (let i = 0; i < nodes.length; i++) {
@@ -225,7 +286,7 @@ export function validateDocument(json, limits) {
   }
 
   // Scenes
-  scenes.forEach((s, si) => (s?.nodes || []).forEach((n) => ref(n, nodes, "node", `scene ${si}`)));
+  scenes.forEach((s, si) => list(s, "nodes", `scene ${si}`).forEach((n) => ref(n, nodes, "node", `scene ${si}`)));
   if (json.scene !== undefined) ref(json.scene, scenes, "scene", "glTF scene");
 
   // Skins
@@ -249,20 +310,23 @@ export function validateDocument(json, limits) {
   // Animations
   animations.forEach((anim, ai) => {
     const where = `animation ${ai}`;
-    const samplers = anim?.samplers || [];
+    const samplers = list(anim, "samplers", where);
     samplers.forEach((s, k) => {
-      const input = ref(s?.input, accessors, "input accessor", `${where} sampler ${k}`);
+      if (!isObject(s)) fail(`${where} sampler ${k} must be an object`);
+      const input = ref(s.input, accessors, "input accessor", `${where} sampler ${k}`);
       ref(s.output, accessors, "output accessor", `${where} sampler ${k}`);
       if (input.type !== "SCALAR" || input.componentType !== 5126) fail(`${where} sampler ${k}: input must be SCALAR FLOAT`);
     });
-    (anim?.channels || []).forEach((c, k) => {
-      ref(c?.sampler, samplers, "sampler", `${where} channel ${k}`);
-      if (c.target?.node !== undefined) ref(c.target.node, nodes, "target node", `${where} channel ${k}`);
+    list(anim, "channels", where).forEach((c, k) => {
+      if (!isObject(c)) fail(`${where} channel ${k} must be an object`);
+      ref(c.sampler, samplers, "sampler", `${where} channel ${k}`);
+      const target = object(c, "target", `${where} channel ${k}`);
+      if (target.node !== undefined) ref(target.node, nodes, "target node", `${where} channel ${k}`);
     });
   });
 
   // Images stored in bufferViews (read directly when packaging textures).
   arr("images").forEach((img, i) => {
-    if (img?.bufferView !== undefined) ref(img.bufferView, bufferViews, "bufferView", `image ${i}`);
+    if (img.bufferView !== undefined) ref(img.bufferView, bufferViews, "bufferView", `image ${i}`);
   });
 }

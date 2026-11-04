@@ -192,6 +192,75 @@ assert(DEFAULT_LIMITS.maxNodeDepth === 1024 && Object.isFrozen(DEFAULT_LIMITS), 
   rejects(anim((x) => { x.channels[0].target.node = 6; }), /channel 0: target node 6 does not exist/, "channel node missing");
 }
 
+// ---- Mesh / accessor consistency ----
+{
+  // Extra zero accessors (no bufferView) with a chosen count / type.
+  const withAccessor = (acc, fn) => withJson((j) => { j.accessors.push(acc); fn(j, j.accessors.length - 1); });
+  const attr = (name, acc) => withAccessor(acc, (j, a) => { j.meshes[0].primitives[0].attributes[name] = a; });
+  rejects(attr("NORMAL", { componentType: 5126, count: 4, type: "VEC3" }), /mesh 0 primitive 0: NORMAL \(accessor 2\) has 4 elements, POSITION \(accessor 0\) has 3/, "POSITION / NORMAL count mismatch");
+  rejects(attr("TEXCOORD_0", { componentType: 5126, count: 2, type: "VEC2" }), /TEXCOORD_0 \(accessor 2\) has 2 elements, POSITION \(accessor 0\) has 3/, "POSITION / TEXCOORD_0 count mismatch");
+  rejects(attr("COLOR_0", { componentType: 5126, count: 5, type: "VEC4" }), /COLOR_0 \(accessor 2\) has 5 elements/, "POSITION / COLOR_0 count mismatch");
+  rejects(attr("TANGENT", { componentType: 5126, count: 1, type: "VEC4" }), /TANGENT \(accessor 2\) has 1 elements/, "POSITION / TANGENT count mismatch");
+  rejects(attr("WEIGHTS_0", { componentType: 5126, count: 6, type: "VEC4" }), /WEIGHTS_0 \(accessor 2\) has 6 elements/, "POSITION / WEIGHTS_0 count mismatch");
+  // Custom attributes ("_NAME") are not vertex-count checked.
+  assert(accepts(attr("_TEMPERATURE", { componentType: 5126, count: 1, type: "SCALAR" }), "custom attribute").includes("def Mesh"), "custom attribute with another count is accepted");
+  rejects(withAccessor({ componentType: 5126, count: 2, type: "VEC3" }, (j, a) => { j.meshes[0].primitives[0].targets = [{ POSITION: a }]; }),
+    /mesh 0 primitive 0 target 0: POSITION \(accessor 2\) has 2 elements, POSITION has 3/, "morph target count mismatch");
+  // Index accessors.
+  rejects(withJson((j) => { j.accessors[1].type = "VEC3"; j.accessors[1].count = 1; }), /indices \(accessor 1\) must be SCALAR, not VEC3/, "indices VEC3");
+  rejects(withJson((j) => { j.accessors[1] = { componentType: 5126, count: 3, type: "SCALAR" }; }), /indices \(accessor 1\) componentType 5126 must be 5121, 5123 or 5125/, "indices FLOAT");
+  rejects(withJson((j) => { j.accessors[1].normalized = true; }), /indices \(accessor 1\) must not be normalized/, "normalized indices");
+  {
+    const b = bin.slice();
+    new DataView(b.buffer).setUint16(40, 3, true); // third index (bufferView 1 starts at 36) = 3
+    rejects(makeGlb(json, b), /mesh 0 primitive 0: indices \(accessor 1\) value 2 is 3, but POSITION has 3 vertices/, "index value >= vertex count");
+    new DataView(b.buffer).setUint16(40, 65535, true);
+    rejects(makeGlb(json, b), /value 2 is 65535/, "primitive-restart-like index");
+  }
+  rejects(withJson((j) => { j.accessors[1].count = 2; }), /indices \(accessor 1\) has 2 indices, not a multiple of 3 \(TRIANGLES\)/, "TRIANGLES index count not a multiple of 3");
+  rejects(withJson((j) => { delete j.meshes[0].primitives[0].indices; j.accessors[0].count = 2; }), /2 vertices without indices, not a multiple of 3/, "TRIANGLES vertex count not a multiple of 3");
+  // Strips / fans have no multiple-of-3 rule.
+  assert(accepts(withJson((j) => { j.meshes[0].primitives[0].mode = 5; }), "strip").includes("def Mesh"), "TRIANGLE_STRIP with 3 indices");
+  rejects(withJson((j) => { j.meshes[0].primitives[0].mode = 9; }), /mode 9 is not a glTF primitive mode/, "unknown primitive mode");
+}
+
+// ---- JSON structure types ----
+rejects(withJson((j) => { j.nodes[0].children = 1; }), /node 0: children must be an array/, "children is a number");
+rejects(withJson((j) => { j.nodes[0].children = "1"; }), /node 0: children must be an array/, "children is a string");
+rejects(withJson((j) => { j.scenes[0].nodes = { 0: 0 }; }), /scene 0: nodes must be an array/, "scene.nodes is an object");
+rejects(withJson((j) => { j.animations = [{ samplers: {}, channels: [] }]; }), /animation 0: samplers must be an array/, "animation.samplers not an array");
+rejects(withJson((j) => { j.animations = [{ samplers: [], channels: 3 }]; }), /animation 0: channels must be an array/, "animation.channels not an array");
+rejects(withJson((j) => { j.animations = [{ samplers: [null], channels: [] }]; }), /animation 0 sampler 0 must be an object/, "sampler is null");
+rejects(withJson((j) => { j.animations = [{ samplers: [], channels: ["x"] }]; }), /animation 0 channel 0 must be an object/, "channel is a string");
+rejects(withJson((j) => { j.meshes[0].primitives = {}; }), /mesh 0: primitives must be an array/, "primitives is an object");
+rejects(withJson((j) => { j.meshes[0].primitives[0] = 7; }), /mesh 0 primitive 0 must be an object/, "primitive is a number");
+rejects(withJson((j) => { j.meshes[0].primitives[0].attributes = [0]; }), /attributes must be an object/, "attributes is an array");
+rejects(withJson((j) => { j.meshes[0].primitives[0].targets = {}; }), /mesh 0 primitive 0: targets must be an array/, "targets is an object");
+rejects(withJson((j) => { j.meshes[0].primitives[0].targets = [null]; }), /target 0 must be an object/, "target is null");
+rejects(withJson((j) => { j.materials = [null]; }), /glTF materials\[0\] must be an object/, "material is null");
+rejects(withJson((j) => { j.nodes.push([]); }), /glTF nodes\[1\] must be an object/, "node is an array");
+rejects(withJson((j) => { j.textures = ["t"]; }), /glTF textures\[0\] must be an object/, "texture is a string");
+
+// ---- maxInputBytes for JSON text and glTF objects ----
+{
+  const doc = { asset: { version: "2.0" }, scenes: [{ nodes: [0] }], nodes: [{ name: "N" }] };
+  const text = JSON.stringify(doc);
+  rejects(text, new RegExp(`glTF JSON text is at least ${text.length} bytes \\(UTF-8\\), more than limits.maxInputBytes \\(${text.length - 1}\\)`), "JSON text over the limit", { limits: { maxInputBytes: text.length - 1 } });
+  assert(accepts(text, "JSON text at the limit", { limits: { maxInputBytes: text.length } }).includes('def Xform "N"'), "JSON text exactly at the limit");
+  // Multi-byte text: few UTF-16 code units, more UTF-8 bytes.
+  const wide = JSON.stringify({ ...doc, nodes: [{ name: "ノード".repeat(10) }] });
+  const utf8 = new TextEncoder().encode(wide).length;
+  assert(utf8 > wide.length, "test setup: UTF-8 longer than the string");
+  rejects(wide, new RegExp(`is ${utf8} bytes \\(UTF-8\\)`), "UTF-8 size counted, not string length", { limits: { maxInputBytes: wide.length + 1 } });
+  // A glTF object has no byte size: maxInputBytes does not apply, the other limits do.
+  assert(accepts(doc, "object input", { limits: { maxInputBytes: 1 } }).includes('def Xform "N"'), "object input ignores maxInputBytes");
+  rejects(doc, /more than limits.maxNodes \(0\)/, "object input still has the other limits", { limits: { maxNodes: 0 } });
+  // External buffers count against maxInputBytes too.
+  const j = clone(json);
+  j.buffers[0].uri = "tri.bin";
+  rejects(j, /External buffer "tri.bin" is 44 bytes, more than limits.maxInputBytes \(40\)/, "external buffer over the limit", { limits: { maxInputBytes: 40 }, resources: { "tri.bin": bin } });
+}
+
 // No internal TypedArray / DataView errors escape for any single-byte corruption of the
 // header and JSON-chunk header: every failure is a GltfValidationError.
 for (let i = 0; i < 20; i++) {

@@ -199,7 +199,14 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
    accessor の byteOffset のアライメント違反は DataView で読めるので拒否しない（実ファイルを壊さないため）。
    アニメーションのキーが壊れたチャンネル（時刻が減る、NaN / Infinity、個数が合わない）は警告してスキップ。同時刻のキーは最後を残す。
    JOINTS の範囲外（ウェイト > 0）・負 / NaN のウェイトはエラー、ウェイトの合計が 1 でない頂点は警告してそのまま書く。
+   Mesh: 頂点属性（NORMAL / TANGENT / TEXCOORD_n / COLOR_n / JOINTS_n / WEIGHTS_n）と morph target の要素数は POSITION と同じ
+   （`_NAME` の独自属性は対象外）、インデックスは SCALAR・5121/5123/5125・normalized なし、TRIANGLES は 3 の倍数（インデックスなしなら頂点数）、
+   mode は 0..6、インデックスの値は POSITION の数未満（値はデコード後でないと分からないので `buildTriangleIndices()` で検査）。
+   JSON の型: トップレベル配列の要素・primitive・target・sampler・channel はオブジェクト、children / scene.nodes / samplers / channels /
+   primitives / targets は配列（標準の TypeError を出さない）。
    `DEFAULT_LIMITS` はメモリとスタックを守るためだけのもの（入力 2 GiB、accessor 1 本 2^26 値、ノードの深さ 1024 など）。
+   `maxInputBytes` は GLB / glTF のバイト列、JSON 文字列（UTF-8 のバイト数）、`options.resources` の外部バッファそれぞれに適用。
+   パース済みの glTF オブジェクトにはバイト数がないので対象外（ほかの上限は適用）。
    変更前後で 26 個のフィクスチャの出力がバイト単位で一致することを確認済み。
 20. **頂点アルファはランプ画像 + 専用 UV で表す。** glTF はアルファ = factor.a × テクスチャ.a × COLOR_0.a で、BLEND / MASK のときだけ使う
    （OPAQUE・既定マテリアルは無視）。最初は `inputs:opacity` ← `UsdPrimvarReader_float`（`displayOpacity`）にしたが、**Quick Look は
@@ -211,6 +218,9 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
    ベースカラーテクスチャとの掛け合わせはできないのでテクスチャのアルファを使い警告。対象マテリアルは `planVertexAlpha()` で事前に決める。
    MASK は Quick Look がしきい値を超えた部分も中途半端な opacity で描いた（glTF では不透明）ので、MASK のマテリアルには
    COLOR_0.a = cutoff / factor.a で 0 → 1 に切り替わる階段のランプ（`vertex_alpha_step_<texel>.png`、scale 1）を使う。
+   UsdUVTexture にはフィルタの指定がない（Nearest を指定できない）ので、線形補間で階段の 2 テクセルの間に中間の値が出る。
+   その帯を狭くするため階段は 4096 テクセル（BLEND の 256 テクセルの 1/16 の幅）にし、帯の中央を cutoff / factor.a に合わせて
+   `opacityThreshold = 0.5` で切る。`test/color.js` で線形補間を再現して、glTF の判定と食い違うのが切れ目の 1 テクセル以内だけであることを確認。
    BLEND のランプも MASK の階段も、iOS の Quick Look で glTF どおりに表示されることを確認済み（vertex-alpha.usdz の A / B / C）。
 21. **USDZ の ZIP 上限は書く前に検査する。** `planLayout()` が長さだけから全オフセットを計算し、32 / 16 ビットのフィールドに収まらなければ
    `UsdzLimitError`（"USDZ exceeds supported ZIP size limits"）。エントリ名は相対・スラッシュ区切り・`.` `..` 空セグメントなし・

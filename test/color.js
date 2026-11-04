@@ -109,19 +109,45 @@ for (const [factor, label] of [[1, "factor 1"], [0.5, "factor 0.5"]]) {
   assert(raw[0] === 0 && raw[1 + 2 * 128] === 128 && raw[2 + 2 * 128] === 128 && raw[2 + 2 * 255] === 255, "ramp pixels: gray = alpha = x");
 }
 
-// VEC4 + MASK: a 0 / 1 step ramp at COLOR_0.a = cutoff / factor.a (Quick Look draws partial
-// opacity inside a MASK cut-out; glTF draws it opaque), scale 1, threshold = cutoff.
-for (const [cutoff, factor, step] of [[0.25, 1, 64], [0.25, 0.5, 128], [0.5, 1, 128], [1, 0.5, 256]]) {
+// VEC4 + MASK: a 0 / 1 step ramp (4096 texels) whose middle is at COLOR_0.a = cutoff / factor.a,
+// threshold 0.5 (Quick Look draws partial opacity inside a MASK cut-out; glTF draws it opaque).
+/** Alpha channel of a 1-row gray + alpha PNG written with stored deflate blocks (src/png.js). */
+function rampAlphas(png) {
+  const dv = new DataView(png.buffer, png.byteOffset);
+  const width = dv.getUint32(16);
+  const idat = png.indexOf(0x49, 33); // "IDAT" type
+  const raw = png.subarray(idat + 4 + 2 + 5, idat + 4 + 2 + 5 + 1 + 2 * width); // zlib + stored-block headers
+  return Array.from({ length: width }, (_, x) => raw[2 + 2 * x] / 255);
+}
+/** Bilinear (1D) sampling with clamp-to-edge at u, as a GPU's linear filter does. */
+function sampleLinear(alphas, u) {
+  const t = u * alphas.length - 0.5;
+  const i = Math.floor(t), f = t - i;
+  const at = (k) => alphas[Math.min(alphas.length - 1, Math.max(0, k))];
+  return at(i) * (1 - f) + at(i + 1) * f;
+}
+for (const [cutoff, factor] of [[0.25, 1], [0.25, 0.5], [0.5, 1], [0.7, 0.8], [1, 0.5], [0.3, 0]]) {
   const label = `MASK cutoff ${cutoff} factor ${factor}`;
   const { usda, files } = glbToUsda(colored({ colors: RGBA, material: { alphaMode: "MASK", alphaCutoff: cutoff, pbrMetallicRoughness: { baseColorFactor: [1, 1, 1, factor] } } }));
   const ramp = usda.slice(usda.indexOf('def Shader "Texture_vertexAlpha"'));
-  assert(usda.includes("Texture_vertexAlpha.outputs:a") && line(usda, "opacityThreshold").includes(`${cutoff}`), `${label}: ramp + threshold`);
-  assert(ramp.includes(`@textures/vertex_alpha_step_${step}.png@`) && ramp.includes("float4 inputs:scale = (1, 1, 1, 1)"), `${label}: step ramp ${step}: ${ramp.match(/@.*@/)?.[0]}`);
-  const png = files.find((f) => f.name === `textures/vertex_alpha_step_${step}.png`).bytes;
-  const idat = png.indexOf(0x49, 33);
-  const raw = png.subarray(idat + 4 + 2 + 5, idat + 4 + 2 + 5 + 513);
-  const alphaAt = (x) => raw[2 + 2 * x];
-  assert((step === 0 || alphaAt(step - 1) === 0) && (step >= 256 || alphaAt(step) === 255), `${label}: step at texel ${step}`);
+  const file = ramp.match(/@(textures\/vertex_alpha_step_\d+\.png)@/)?.[1];
+  assert(file && ramp.includes("float4 inputs:scale = (1, 1, 1, 1)"), `${label}: step ramp, scale 1: ${ramp.slice(0, 200)}`);
+  assert(line(usda, "opacityThreshold").includes("= 0.5"), `${label}: threshold 0.5 (the middle of the step)`);
+  const alphas = rampAlphas(files.find((f) => f.name === file).bytes);
+  assert(alphas.length === 4096 && alphas.every((a) => a === 0 || a === 1), `${label}: 4096 texels of 0 / 1`);
+  // Sample like the renderer at u = vertexAlphaUV(a) for many a: kept (≥ 0.5) must match glTF
+  // (a × factor ≥ cutoff) except within one step-ramp texel of the cut; partial values only there.
+  const limit = factor > 0 ? cutoff / factor : Infinity;
+  const texel = 256 / 4096 / 255; // one MASK-ramp texel in COLOR_0.a
+  let wrong = 0, partial = 0;
+  for (let k = 0; k <= 100000; k++) {
+    const a = k / 100000;
+    const v = sampleLinear(alphas, u(a));
+    if (v > 0 && v < 1) { partial++; if (Math.abs(a - limit) > texel) wrong++; }
+    if ((v >= 0.5) !== (a * factor >= cutoff) && Math.abs(a - limit) > texel / 2 + 1e-9) wrong++;
+  }
+  assert(!wrong, `${label}: ${wrong} samples disagree with glTF away from the cut`);
+  assert(partial <= Math.ceil(2 * texel * 100000) + 1, `${label}: partial-opacity band is ${partial / 100000} of the alpha range`);
 }
 {
   // BLEND and MASK materials in one file get separate ramps, each packaged once.
@@ -137,7 +163,7 @@ for (const [cutoff, factor, step] of [[0.25, 1, 64], [0.25, 0.5, 128], [0.5, 1, 
   }
   const { files } = glbToUsda(makeGlb(json, glb.subarray(28 + jsonLen)));
   const names = files.map((f) => f.name).sort().join();
-  assert(names === "textures/vertex_alpha_ramp.png,textures/vertex_alpha_step_128.png", `ramps packaged once each: ${names}`);
+  assert(/^textures\/vertex_alpha_ramp\.png,textures\/vertex_alpha_step_\d+\.png$/.test(names), `ramps packaged once each: ${names}`);
 }
 
 // A mesh without vertex alpha that shares the material gets alpha 1 in its ramp UVs.

@@ -1,6 +1,6 @@
 // Public API: works in browsers and Node (ESM).
 import { parseGLB, parseGltf, GltfAsset, resolveResource, DataUnavailableError } from "./glb.js";
-import { GltfValidationError, DEFAULT_LIMITS } from "./validate.js";
+import { GltfValidationError, DEFAULT_LIMITS, resolveLimits } from "./validate.js";
 import { gltfToStage } from "./convert.js";
 import { writeUsda } from "./usda.js";
 import { packUsdz, UsdzLimitError } from "./usdz.js";
@@ -37,7 +37,9 @@ export function gltfToUsda(asset, options = {}) {
  *   (animated subtrees become joints, meshes bound rigidly), which AR Quick Look-style
  *   viewers play; "xform" writes time-sampled translate / orient / scale xformOps.
  * options.limits: resource limits, e.g. { maxInputBytes, maxAccessorValues, maxNodeDepth }
- *   (defaults in DEFAULT_LIMITS; Infinity disables one).
+ *   (defaults in DEFAULT_LIMITS; Infinity disables one). maxInputBytes applies to GLB / glTF
+ *   bytes, to JSON text (its UTF-8 size) and to each external buffer from options.resources;
+ *   an already parsed glTF object has no byte size, so only the other limits apply to it.
  *
  * Invalid input (not glTF 2.0, references or byte ranges out of bounds, limits exceeded)
  * throws GltfValidationError with the offending index in the message.
@@ -89,6 +91,13 @@ function packUsda({ usda, files }, options) {
 
 function parseInput(input, { limits } = {}) {
   if (typeof input === "string") {
+    // maxInputBytes counts UTF-8 bytes (what the text would be as a file). A JS string's
+    // UTF-8 size is between its length and 3 × its length, so most strings skip encoding.
+    const max = resolveLimits(limits).maxInputBytes;
+    if (input.length * 3 > max) {
+      const bytes = input.length > max ? input.length : new TextEncoder().encode(input).length;
+      if (bytes > max) throw new GltfValidationError(`glTF JSON text is ${input.length > max ? "at least " : ""}${bytes} bytes (UTF-8), more than limits.maxInputBytes (${max})`);
+    }
     try {
       return { json: JSON.parse(input), bin: null };
     } catch (e) {

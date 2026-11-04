@@ -144,6 +144,9 @@ export class GltfAsset {
     if (!bytes) {
       throw new Error(`External buffer "${buffer.uri}" was not provided (pass it in options.resources)`);
     }
+    if (bytes.byteLength > this.limits.maxInputBytes) {
+      throw new GltfValidationError(`External buffer "${buffer.uri}" is ${bytes.byteLength} bytes, more than limits.maxInputBytes (${this.limits.maxInputBytes})`);
+    }
     return this._checkBufferSize(bytes, buffer, index, `External buffer "${buffer.uri}"`);
   }
 
