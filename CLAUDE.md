@@ -208,7 +208,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
    ベースカラーテクスチャとの掛け合わせはできないのでテクスチャのアルファを使い警告。対象マテリアルは `planVertexAlpha()` で事前に決める。
    MASK は Quick Look がしきい値を超えた部分も中途半端な opacity で描いた（glTF では不透明）ので、MASK のマテリアルには
    COLOR_0.a = cutoff / factor.a で 0 → 1 に切り替わる階段のランプ（`vertex_alpha_step_<texel>.png`、scale 1）を使う。
-   BLEND のランプは iOS の Quick Look で頂点アルファどおりに表示されることを確認済み（vertex-alpha.usdz の A / B）。
+   BLEND のランプも MASK の階段も、iOS の Quick Look で glTF どおりに表示されることを確認済み（vertex-alpha.usdz の A / B / C）。
 21. **USDZ の ZIP 上限は書く前に検査する。** `planLayout()` が長さだけから全オフセットを計算し、32 / 16 ビットのフィールドに収まらなければ
    `UsdzLimitError`（"USDZ exceeds supported ZIP size limits"）。エントリ名は相対・スラッシュ区切り・`.` `..` 空セグメントなし・
    大文字小文字を無視して一意、先頭は .usda / .usdc / .usd。出力バイトは変更前と同一。
