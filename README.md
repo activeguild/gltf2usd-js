@@ -144,7 +144,7 @@ GLB を選ぶかドロップすると（またはサンプルボタンで）、�
   POSITION の有無、モードごとの要素数（POINTS ≥ 1、LINES ≥ 2 かつ偶数、LINE_LOOP / LINE_STRIP ≥ 2、TRIANGLES ≥ 3 かつ 3 の倍数、
   TRIANGLE_STRIP / FAN ≥ 3。インデックスがなければ頂点数）、インデックスの予約値（UNSIGNED_BYTE 255 / UNSIGNED_SHORT 65535 /
   UNSIGNED_INT 4294967295 は使えない）、独自属性（名前は `_` で始まり、UNSIGNED_INT は不可）、accessor の normalized（boolean で、FLOAT / UNSIGNED_INT には付けられない）、
-  EXT_mesh_gpu_instancing の属性（型・count の一致・構造）、インデックス（型・値の範囲・TRIANGLES は 3 の倍数）、sparse の構造と昇順、accessor / sparse のアライメントと byteStride の使い方、
+  EXT_mesh_gpu_instancing の属性（型・count の一致・構造）、インデックス（型・値の範囲・上のモードごとの要素数）、accessor の count（1 以上の整数。使われない accessor も含む）、sparse の構造と昇順、accessor / sparse のアライメントと byteStride の使い方、
   JSON の型（配列・オブジェクト）は変換前にすべて検査し、不正なら `GltfValidationError`（何番の何が不正かをメッセージに入れる）。0 埋めや切り詰めで
   変換を続けることはしない。マテリアル / テクスチャ / 画像 / ライト / バリアントの不正な参照は、従来どおりその参照を無視して警告する
   （見た目のデータで、無くても形は正しく出せるため）。アニメーションのキーが壊れている（時刻が減る、NaN、個数が合わない）チャンネルは

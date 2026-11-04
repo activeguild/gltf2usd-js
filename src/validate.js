@@ -263,7 +263,8 @@ export function validateDocument(json, limits) {
     const where = `accessor ${i}`;
     if (!(acc?.componentType in COMPONENT_SIZE)) fail(`${where}: unsupported componentType ${acc?.componentType}`);
     if (!(acc.type in TYPE_COUNT)) fail(`${where}: unsupported type ${JSON.stringify(acc.type)}`);
-    if (!isIndex(acc.count)) fail(`${where}: count must be a non-negative integer`);
+    // glTF 2.0: count is an integer ≥ 1 (also for accessors nothing uses).
+    if (!Number.isInteger(acc.count) || acc.count < 1) fail(`${where}: count must be a positive integer (got ${JSON.stringify(acc.count)})`);
     // normalized is a boolean, and only integer types other than UNSIGNED_INT can be normalized.
     if (acc.normalized !== undefined && typeof acc.normalized !== "boolean") fail(`${where}: normalized must be a boolean (got ${JSON.stringify(acc.normalized)})`);
     if (acc.normalized && (acc.componentType === FLOAT || acc.componentType === 5125)) {

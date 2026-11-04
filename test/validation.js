@@ -96,7 +96,23 @@ rejects(withJson((j) => { j.buffers[0].byteLength = -1; }), /buffer 0: byteLengt
 rejects(withJson((j) => { j.accessors[0].bufferView = 9; }), /accessor 0: bufferView 9 does not exist/, "accessor.bufferView out of range");
 rejects(withJson((j) => { j.accessors[0].componentType = 5124; }), /unsupported componentType 5124/, "INT componentType");
 rejects(withJson((j) => { j.accessors[0].type = "VEC5"; }), /unsupported type "VEC5"/, "unknown type");
-rejects(withJson((j) => { j.accessors[0].count = -1; }), /count must be a non-negative integer/, "negative count");
+// count ≥ 1 for every accessor (glTF 2.0), used or not.
+rejects(withJson((j) => { j.accessors[0].count = -1; }), /accessor 0: count must be a positive integer \(got -1\)/, "negative count");
+rejects(withJson((j) => { j.accessors.push({ componentType: 5126, count: 0, type: "SCALAR" }); }), /accessor 2: count must be a positive integer \(got 0\)/, "unused accessor with count 0");
+rejects(withJson((j) => { j.accessors[0].count = 0; }), /accessor 0: count must be a positive integer \(got 0\)/, "POSITION accessor with count 0");
+rejects(withJson((j) => { j.accessors[1].count = 0; }), /accessor 1: count must be a positive integer \(got 0\)/, "indices accessor with count 0");
+rejects(withJson((j) => { j.accessors[0].count = 1.5; }), /accessor 0: count must be a positive integer \(got 1.5\)/, "fractional count");
+rejects(withJson((j) => { j.accessors[0].count = "3"; }), /accessor 0: count must be a positive integer \(got "3"\)/, "string count");
+rejects(withJson((j) => { j.accessors[0].count = null; }), /accessor 0: count must be a positive integer \(got null\)/, "null count");
+rejects(withJson((j) => { delete j.accessors[0].count; }), /accessor 0: count must be a positive integer \(got undefined\)/, "missing count");
+assert(accepts(withJson((j) => { j.accessors.push({ componentType: 5126, count: 1, type: "SCALAR" }); }), "unused accessor with count 1").includes("def Mesh"), "unused accessor with count 1 accepted");
+{
+  // POSITION with count 1: the accessor rule passes, the mode rule decides (POINTS ≥ 1 vertex, TRIANGLES ≥ 3).
+  const one = (mode) => makeGlb({ asset: { version: "2.0" }, scenes: [{ nodes: [0] }], nodes: [{ mesh: 0 }],
+    meshes: [{ primitives: [{ attributes: { POSITION: 0 }, mode }] }], accessors: [{ componentType: 5126, count: 1, type: "VEC3" }] });
+  accepts(one(0), "POINTS with a count-1 POSITION");
+  rejects(one(4), /without indices, POSITION \(accessor 0\): mode 4 \(TRIANGLES\) needs at least 3 and a multiple of 3, got 1 vertices/, "TRIANGLES with a count-1 POSITION (mode rule)");
+}
 rejects(withJson((j) => { j.accessors[0].count = 4; }), /Accessor exceeds bufferView bounds: accessor 0 needs 48 bytes, bufferView 0 has 36/, "count past bufferView");
 rejects(withJson((j) => { j.accessors[0].byteOffset = 4; }), /Accessor exceeds bufferView bounds/, "byteOffset pushes past bufferView");
 rejects(withJson((j) => { j.accessors[0].byteOffset = 1.5; }), /byteOffset must be a non-negative integer/, "fractional accessor.byteOffset");
@@ -289,8 +305,10 @@ assert(DEFAULT_LIMITS.maxNodeDepth === 1024 && Object.isFrozen(DEFAULT_LIMITS), 
       ok({ mode, vertices: n }, `${NAMES[mode]} with ${n} vertices, no indices`);
     }
     for (const n of wrong) {
-      bad({ mode, vertices: Math.max(n, 3), indices: n }, new RegExp(`mesh 0 primitive 0: indices \\(accessor 1\\): mode ${mode} \\(${NAMES[mode]}\\) needs at least .*, got ${n} indices`), `${NAMES[mode]} with ${n} indices`);
-      bad({ mode, vertices: n }, new RegExp(`mesh 0 primitive 0: without indices, POSITION \\(accessor 0\\): mode ${mode} \\(${NAMES[mode]}\\) needs at least .*, got ${n} vertices`), `${NAMES[mode]} with ${n} vertices, no indices`);
+      // A count of 0 is already refused by the accessor rule (count ≥ 1), before the mode rule.
+      const zero = (a) => new RegExp(`accessor ${a}: count must be a positive integer \\(got 0\\)`);
+      bad({ mode, vertices: Math.max(n, 3), indices: n }, n === 0 ? zero(1) : new RegExp(`mesh 0 primitive 0: indices \\(accessor 1\\): mode ${mode} \\(${NAMES[mode]}\\) needs at least .*, got ${n} indices`), `${NAMES[mode]} with ${n} indices`);
+      bad({ mode, vertices: n }, n === 0 ? zero(0) : new RegExp(`mesh 0 primitive 0: without indices, POSITION \\(accessor 0\\): mode ${mode} \\(${NAMES[mode]}\\) needs at least .*, got ${n} vertices`), `${NAMES[mode]} with ${n} vertices, no indices`);
     }
   }
   // Mode omitted = TRIANGLES; LINES messages name the even-count rule.

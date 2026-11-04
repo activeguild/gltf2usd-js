@@ -206,6 +206,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
    JOINTS の範囲外（ウェイト > 0）・負 / NaN のウェイトはエラー、ウェイトの合計が 1 でない頂点は警告してそのまま書く。
    Mesh: primitive の全属性（標準も `_NAME` の独自属性も例外なし）と morph target の要素数は POSITION と同じ（§ 3.7.2.1）。
    TEXCOORD_n / COLOR_n / JOINTS_n / WEIGHTS_n の n は 0 か先頭ゼロなしの 1〜999999999（9 桁まで）で、0 から欠けなく連続（`setsOf()`）。
+   accessor の count は 1 以上の整数（0・負数・小数・文字列・null は不可。使われない accessor も含む）。
    インデックスは SCALAR・5121/5123/5125・normalized なし。mode は 0..6（省略時 4）で、インデックス数（なければ頂点数）は
    POINTS ≥ 1、LINES ≥ 2 かつ偶数、LINE_LOOP / LINE_STRIP ≥ 2、TRIANGLES ≥ 3 かつ 3 の倍数、TRIANGLE_STRIP / FAN ≥ 3（`MODE_RULES`）。
    インデックスの値は componentType の最大値（255 / 65535 / 4294967295、予約値）でなく、POSITION の数未満。値はデコード後でないと
