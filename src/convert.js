@@ -39,6 +39,7 @@ const SUPPORTED_EXTENSIONS = new Set([
   "KHR_materials_unlit",
   "KHR_lights_punctual",
   "EXT_mesh_gpu_instancing",
+  "KHR_materials_variants",
 ]);
 
 /** USD primvar name for glTF TEXCOORD_n: st, st1, st2, ... */
@@ -58,6 +59,7 @@ export function gltfToStage(asset, options = {}) {
     imageNames: new Map(), // image index -> file name
     usedFileNames: new Set(),
     warn: makeWarn(options.onWarning),
+    meshPrimPaths: new Map(), // "mesh:primitive" → USD paths of its Mesh prims
   };
   reportUnsupported(ctx);
   ctx.animation = evaluateAnimation(ctx, options.animation ?? 0);
@@ -112,7 +114,7 @@ export function gltfToStage(asset, options = {}) {
   if (ctx.prototypes.size) {
     const meshes = root.child(new Prim("Xform", "Meshes", { specifier: "class" }));
     for (const [meshIndex, protoName] of ctx.prototypes) {
-      buildMeshPrims(ctx, meshes.child(new Prim("Xform", protoName)), meshIndex, new Set());
+      buildMeshPrims(ctx, meshes.child(new Prim("Xform", protoName)), meshIndex, new Set(), null, `/Root/Meshes/${protoName}`);
     }
   }
 
@@ -122,6 +124,7 @@ export function gltfToStage(asset, options = {}) {
     const scope = root.child(new Prim("Scope", "Materials"));
     materials.forEach((mat, i) => buildMaterial(ctx, scope, mat, i));
   }
+  buildMaterialVariants(ctx, root);
 
   return { layer, files: ctx.files };
 }
@@ -187,7 +190,7 @@ function buildNode(ctx, parent, nodeIndex, siblingNames, parentPath) {
       buildSkeleton(ctx, NO_JOINTS, skelRoot, skelRootPath, shapes, (nd) => restWeights(ctx, nd));
       skelPrimsFirst(skelRoot);
     } else if (node.extensions?.EXT_mesh_gpu_instancing) {
-      buildGpuInstances(ctx, xform, node, names, protoName);
+      buildGpuInstances(ctx, xform, node, names, protoName, path);
     } else if (protoName) {
       const mesh = ctx.json.meshes[node.mesh];
       const instName = uniqueName(sanitize(mesh.name, `Mesh_${node.mesh}`), names);
@@ -195,7 +198,7 @@ function buildNode(ctx, parent, nodeIndex, siblingNames, parentPath) {
         metadata: { instanceable: true, "prepend references": { path: `/Root/Meshes/${protoName}` } },
       }));
     } else {
-      buildMeshPrims(ctx, xform, node.mesh, names);
+      buildMeshPrims(ctx, xform, node.mesh, names, null, path);
     }
   }
 
@@ -210,12 +213,18 @@ function buildNode(ctx, parent, nodeIndex, siblingNames, parentPath) {
  * `skel` binds the meshes to a Skeleton in a SkelRoot:
  *   { plan: SkinPlan | null, skelRootPath, shapes: collected blend shapes, node: glTF node (for weights) }
  */
-function buildMeshPrims(ctx, parent, meshIndex, names, skel = null) {
+function buildMeshPrims(ctx, parent, meshIndex, names, skel = null, parentPath = skel?.skelRootPath) {
   const mesh = ctx.json.meshes[meshIndex];
   const base = sanitize(mesh.name, `Mesh_${meshIndex}`);
   (mesh.primitives || []).forEach((prim, pi) => {
     const primName = uniqueName(mesh.primitives.length > 1 ? `${base}_${pi}` : base, names);
+    const before = parent.children.length;
     buildMeshPrim(ctx, parent, prim, primName, skel, mesh);
+    // Remember where each glTF primitive ended up (material variants override these prims).
+    if (parent.children.length > before) {
+      const key = `${meshIndex}:${pi}`;
+      (ctx.meshPrimPaths.get(key) ?? ctx.meshPrimPaths.set(key, []).get(key)).push(`${parentPath}/${primName}`);
+    }
   });
 }
 
@@ -258,6 +267,58 @@ function buildLight(ctx, xform, index, names) {
   prim.attr("float", "inputs:intensity", intensity);
 }
 
+/**
+ * KHR_materials_variants → variantSet "materialVariant" on /Root.
+ *
+ * Variant opinions are weaker than local ones (LIVRPS), so mapped Mesh prims carry no
+ * binding of their own; every variant binds them instead: to the mapped material, or
+ * to the primitive's default material when the variant has no mapping for it (as in
+ * glTF). An extra "default" variant holds the default materials and is the authored
+ * selection, standing for glTF's "no variant selected". Overrides target the prim
+ * where the mesh is defined (the prototype for instanced meshes); mappings are per
+ * mesh primitive, so every instance agrees.
+ */
+function buildMaterialVariants(ctx, root) {
+  const variants = ctx.json.extensions?.KHR_materials_variants?.variants;
+  if (!variants?.length) return;
+  const used = new Set();
+  const names = variants.map((v, i) => uniqueName(sanitize(v.name, `variant_${i}`), used));
+  const defaultName = uniqueName("default", used);
+  for (const n of [defaultName, ...names]) root.variant("materialVariant", n); // every variant, even unused ones
+  root.metadata.variants = { materialVariant: defaultName };
+
+  const materialPath = (index) => `/Root/Materials/${uniqueMaterialName(ctx, index)}`;
+  (ctx.json.meshes || []).forEach((mesh, mi) => (mesh.primitives || []).forEach((prim, pi) => {
+    const mappings = prim.extensions?.KHR_materials_variants?.mappings;
+    if (!mappings?.length) return;
+    const paths = ctx.meshPrimPaths.get(`${mi}:${pi}`) ?? [];
+    const byVariant = new Map();
+    for (const mapping of mappings) {
+      if (!ctx.json.materials?.[mapping.material]) {
+        ctx.warn(`KHR_materials_variants: material ${mapping.material} does not exist; mapping ignored`);
+        continue;
+      }
+      for (const v of mapping.variants ?? []) if (names[v] !== undefined) byVariant.set(v, mapping.material);
+    }
+    const fallback = ctx.json.materials?.[prim.material] ? prim.material : undefined;
+    const choices = [[defaultName, fallback], ...names.map((n, v) => [n, byVariant.get(v) ?? fallback])];
+    for (const [variant, material] of choices) {
+      if (material === undefined) continue; // no default material and no mapping: unbound, as in glTF
+      const body = root.variant("materialVariant", variant);
+      for (const path of paths) overAt(body, path).rel("material:binding", materialPath(material));
+    }
+  }));
+}
+
+/** The nested `over` prim for an absolute /Root/... path inside a variant body. */
+function overAt(body, path) {
+  let prim = body;
+  for (const name of path.split("/").slice(2)) {
+    prim = prim.children.find((c) => c.name === name) ?? prim.child(new Prim("", name, { specifier: "over" }));
+  }
+  return prim;
+}
+
 /** Instances drawn by a node: EXT_mesh_gpu_instancing's attribute count, else 1. */
 function gpuInstanceCount(ctx, node) {
   const attrs = node.extensions?.EXT_mesh_gpu_instancing?.attributes;
@@ -272,7 +333,7 @@ function gpuInstanceCount(ctx, node) {
  * instance becomes an Xform with that transform: an instanceable reference to
  * the mesh prototype when there is one, otherwise a copy of the mesh.
  */
-function buildGpuInstances(ctx, xform, node, names, protoName) {
+function buildGpuInstances(ctx, xform, node, names, protoName, path) {
   const attrs = node.extensions.EXT_mesh_gpu_instancing.attributes || {};
   const mesh = ctx.json.meshes[node.mesh];
   const base = sanitize(mesh.name, `Mesh_${node.mesh}`);
@@ -298,7 +359,7 @@ function buildGpuInstances(ctx, xform, node, names, protoName) {
     const inst = xform.child(new Prim("Xform", instName, { metadata }));
     inst.attr("matrix4d", "xformOp:transform", m);
     inst.attr("token[]", "xformOpOrder", ["xformOp:transform"], { uniform: true });
-    if (!protoName) buildMeshPrims(ctx, inst, node.mesh, new Set());
+    if (!protoName) buildMeshPrims(ctx, inst, node.mesh, new Set(), null, `${path}/${instName}`);
   }
 }
 
@@ -422,10 +483,12 @@ function buildMeshPrimData(ctx, parent, prim, name, skel, gltfMesh) {
   const triCount = indices.length / 3;
 
   const hasMaterial = prim.material !== undefined && ctx.json.materials?.[prim.material];
+  // A primitive whose material only comes from KHR_materials_variants still needs the binding API.
+  const variantMapped = !!prim.extensions?.KHR_materials_variants?.mappings?.length;
   const skinning = skel?.plan ? skinningPrimvars(ctx, skel.plan, prim, pos.count, name) : null;
   const hasShapes = !!(skel && prim.targets?.length);
   const skelBound = !!(skinning || hasShapes);
-  const apiSchemas = [...(skelBound ? ["SkelBindingAPI"] : []), ...(hasMaterial ? ["MaterialBindingAPI"] : [])];
+  const apiSchemas = [...(skelBound ? ["SkelBindingAPI"] : []), ...(hasMaterial || variantMapped ? ["MaterialBindingAPI"] : [])];
   const mesh = parent.child(new Prim("Mesh", name, {
     metadata: apiSchemas.length ? { "prepend apiSchemas": apiSchemas } : {},
   }));
@@ -480,7 +543,9 @@ function buildMeshPrimData(ctx, parent, prim, name, skel, gltfMesh) {
   if (skelBound) mesh.rel("skel:skeleton", `${skel.skelRootPath}/Skeleton`);
 
   if (hasMaterial) {
-    mesh.rel("material:binding", `/Root/Materials/${uniqueMaterialName(ctx, prim.material)}`);
+    // Variant-mapped primitives get their binding from the variantSet only: a binding
+    // authored here (a local opinion) would be stronger than any variant's.
+    if (!variantMapped) mesh.rel("material:binding", `/Root/Materials/${uniqueMaterialName(ctx, prim.material)}`);
     if (ctx.json.materials[prim.material].doubleSided) mesh.attr("bool", "doubleSided", true, { uniform: true });
   }
 }

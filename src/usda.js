@@ -29,7 +29,16 @@ function writePrim(lines, prim, depth) {
   const meta = Object.entries(prim.metadata);
   if (meta.length) {
     lines.push(`${header} (`);
-    for (const [key, value] of meta) lines.push(`${ind}    ${key} = ${fmtMeta(value)}`);
+    for (const [key, value] of meta) {
+      if (key === "variants") {
+        // Variant selections: variants = { string <set> = "<variant>" }
+        lines.push(`${ind}    variants = {`);
+        for (const [set, sel] of Object.entries(value)) lines.push(`${ind}        string ${set} = ${quote(sel)}`);
+        lines.push(`${ind}    }`);
+      } else {
+        lines.push(`${ind}    ${key} = ${fmtMeta(value)}`);
+      }
+    }
     lines.push(`${ind})`);
   } else {
     lines.push(header);
@@ -40,6 +49,17 @@ function writePrim(lines, prim, depth) {
     if (prim.spaced && (i > 0 || prim.props.length)) lines.push("");
     writePrim(lines, child, depth + 1);
   });
+  for (const [setName, variants] of prim.variantSets ?? []) {
+    lines.push("");
+    lines.push(`${ind}    variantSet ${quote(setName)} = {`);
+    for (const [name, body] of variants) {
+      lines.push(`${ind}        ${quote(name)} {`);
+      for (const prop of body.props) writeProp(lines, prop, depth + 3);
+      for (const child of body.children) writePrim(lines, child, depth + 3);
+      lines.push(`${ind}        }`);
+    }
+    lines.push(`${ind}    }`);
+  }
   lines.push(`${ind}}`);
 }
 

@@ -6,9 +6,16 @@
 // `warnings` so it is obvious when the preview, not the converter, is the limit.
 
 import * as THREE from "three";
-import { indexPrims, primReferences } from "./usda-parser.js";
+import { indexPrims, primReferences, traverse } from "./usda-parser.js";
 
-export function buildUsdScene(layer, entries) {
+/**
+ * @param {object} [options]
+ * @param {Record<string, string>} [options.variantSelections]  variantSet name → variant
+ *   (overrides the authored selection; "" means no selection)
+ * Returns { object, warnings, timeline, setTime, variantSets, dispose };
+ * variantSets lists [{ path, set, variants, selection }] for UI.
+ */
+export function buildUsdScene(layer, entries, options = {}) {
   const warnings = [];
   const warnOnce = new Set();
   const warn = (msg) => { if (!warnOnce.has(msg)) { warnOnce.add(msg); warnings.push(msg); } };
@@ -22,6 +29,7 @@ export function buildUsdScene(layer, entries) {
   const updaters = []; // (timeCode | undefined) => void, for skeletons and blend shape weights
   const skeletons = new Map(); // Skeleton prim path → { skeleton: THREE.Skeleton, group, update }
   const objects = new Map(); // prim path → Object3D
+  const { overrides, variantSets } = collectVariantOverrides(layer, options.variantSelections ?? {});
 
   const root = new THREE.Group();
   root.name = "USD";
@@ -53,13 +61,16 @@ export function buildUsdScene(layer, entries) {
   };
   setTime(timeline ? timeline.start : undefined);
 
-  return { object: root, warnings, timeline, setTime, dispose: () => objectUrls.forEach((u) => URL.revokeObjectURL(u)) };
+  return { object: root, warnings, timeline, setTime, variantSets, dispose: () => objectUrls.forEach((u) => URL.revokeObjectURL(u)) };
 
   // ---------- Prims ----------
 
   function buildPrim(prim) {
     if (prim.specifier === "class") return null;
     prim = composeReferences(prim, 0);
+    // Selected variants' opinions (the converter only authors material:binding there).
+    const over = overrides.get(prim.path);
+    if (over) prim = { ...prim, props: new Map([...prim.props, ...over]) };
     if (prim.type === "Material" || prim.type === "Shader") return null;
     // UsdSkel prims are read through the meshes bound to them.
     if (prim.type === "Skeleton" || prim.type === "SkelAnimation" || prim.type === "BlendShape") return null;
@@ -573,6 +584,38 @@ export function buildUsdScene(layer, entries) {
     textureCache.set(texPrim.path, tex);
     return tex;
   }
+}
+
+// ---------- Variants ----------
+
+/**
+ * Opinions of the selected variants, as Map<prim path, Map<prop name, Prop>>.
+ * Variant contents are parsed with plain paths, so a body's props apply to the
+ * owning prim and its child prims to owner/child/... Variant opinions are weaker
+ * than local ones in USD; the converter never authors both for the same property.
+ */
+function collectVariantOverrides(layer, selections) {
+  const overrides = new Map();
+  const variantSets = [];
+  const add = (path, props) => {
+    if (!props.size) return;
+    const m = overrides.get(path) ?? new Map();
+    for (const [k, v] of props) if (!m.has(k)) m.set(k, v);
+    overrides.set(path, m);
+  };
+  const walk = (body, path) => {
+    add(path, body.props);
+    for (const child of body.children) walk(child, `${path}/${child.name}`);
+  };
+  for (const prim of traverse(layer.prims)) {
+    for (const [set, variants] of prim.variantSets ?? []) {
+      const selection = set in selections ? selections[set] : prim.metadata.variants?.[set] ?? "";
+      variantSets.push({ path: prim.path, set, variants: [...variants.keys()], selection });
+      const body = variants.get(selection);
+      if (body) walk(body, prim.path);
+    }
+  }
+  return { overrides, variantSets };
 }
 
 // ---------- Time samples (evaluated like USD: linear, slerp for quaternions, held at the ends) ----------

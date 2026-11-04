@@ -227,6 +227,28 @@ assert(f.usda.includes('def Mesh "CubeC"') && f.usda.includes('def Xform "CubeC_
   assert(count(flatInst, 'def Mesh "Cube"') === 3 && !flatInst.includes("instanceable"), "instancing: false copies the mesh per instance");
 }
 
+// ---- KHR_materials_variants → variantSet "materialVariant" on /Root ----
+{
+  const { gltf, resources } = buildCubeGltf();
+  const j = JSON.parse(gltf);
+  j.extensionsUsed = ["KHR_materials_variants"];
+  j.extensions = { KHR_materials_variants: { variants: [{ name: "Red Look" }, { name: "Blue" }] } };
+  j.materials.push({ name: "Blue", pbrMetallicRoughness: { baseColorFactor: [0, 0, 1, 1] } });
+  j.meshes[0].primitives[0].extensions = { KHR_materials_variants: { mappings: [{ material: 1, variants: [1] }] } };
+  const w = [];
+  const v = glbToUsda(j, { resources, onWarning: (m) => w.push(m) }).usda;
+  const at = (name) => v.slice(v.indexOf(`"${name}" {`), v.indexOf("\n        }", v.indexOf(`"${name}" {`)));
+  assert(v.includes('prepend variantSets = ["materialVariant"]') && v.includes('string materialVariant = "default"'), "variantSet with default selection");
+  assert(v.includes('variantSet "materialVariant" = {') && at("default") && at("Red_Look") && at("Blue"), "default + glTF variants");
+  // The (instanced) mesh prototype carries no local binding: it would beat every variant.
+  const proto = v.slice(v.indexOf('class Xform "Meshes"'), v.indexOf('def Scope "Materials"'));
+  assert(proto.includes('prepend apiSchemas = ["MaterialBindingAPI"]') && !proto.includes("material:binding"), "no local binding on mapped mesh");
+  assert(at("default").includes('over "Meshes"') && at("default").includes("rel material:binding = </Root/Materials/Red_Mat>"), "default variant binds the default material");
+  assert(at("Red_Look").includes("</Root/Materials/Red_Mat>"), "unmapped variant falls back to the default material");
+  assert(at("Blue").includes("rel material:binding = </Root/Materials/Blue>"), "mapped variant binds its material");
+  assert(w.length === 0, `no warnings: ${w}`);
+}
+
 // ---- Compressed data that cannot be decoded is skipped, not written as zeros ----
 {
   const { gltf, resources } = buildCubeGltf();

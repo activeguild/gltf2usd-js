@@ -4,7 +4,8 @@
 //
 // Result:
 //   { metadata: {key: value}, prims: Prim[] }
-//   Prim = { specifier, type, name, path, metadata, props: Map<name, Prop>, children: Prim[], parent }
+//   Prim = { specifier, type, name, path, metadata, props: Map<name, Prop>, children: Prim[], parent,
+//            variantSets: Map<set, Map<variant, { props, children }>> }   (variant contents use plain paths)
 //   Prop = { name, type, isArray, uniform, isRel, value, connect, timeSamples, metadata }
 
 export function parseUsda(text) {
@@ -175,28 +176,51 @@ class Parser {
     const prim = {
       specifier: spec.v, type, name,
       path: `${parentPath}/${name}`,
-      metadata: {}, props: new Map(), children: [], parent, line: spec.line,
+      metadata: {}, props: new Map(), children: [], parent, line: spec.line, variantSets: new Map(),
     };
     if (this.peekPunct("(")) prim.metadata = this.parseMetadata();
-    this.expectPunct("{");
+    this.parseBody(prim, prim);
+    return prim;
+  }
+
+  /** `{ properties, child prims, variantSets }` into `target` (a prim or a variant body of `owner`). */
+  parseBody(target, owner) {
+    const open = this.expectPunct("{");
     const childNames = new Set();
     while (!this.peekPunct("}")) {
       const t = this.peek();
-      if (!t) throw syntaxError(`Unterminated prim ${prim.path}`, spec.line);
+      if (!t) throw syntaxError(`Unterminated prim ${owner.path}`, open.line);
       if (t.t === "ident" && SPECIFIERS.has(t.v) && this.peek(1)?.t !== "punct") {
-        const child = this.parsePrim(prim, prim.path);
+        const child = this.parsePrim(owner, owner.path);
         if (childNames.has(child.name)) throw syntaxError(`Duplicate prim ${child.path}`, child.line);
         childNames.add(child.name);
-        prim.children.push(child);
+        target.children.push(child);
       } else if (t.t === "ident" && t.v === "variantSet") {
-        throw syntaxError("variantSet is not supported by this preview parser", t.line);
+        this.parseVariantSet(owner);
       } else {
-        this.parseProperty(prim);
+        this.parseProperty(target);
       }
       if (this.peekPunct(";")) this.next();
     }
     this.expectPunct("}");
-    return prim;
+  }
+
+  /** variantSet "set" = { "variant" [(metadata)] { body } ... } */
+  parseVariantSet(owner) {
+    this.next(); // variantSet
+    const setName = this.expect("string").v;
+    this.expectPunct("=");
+    this.expectPunct("{");
+    const variants = owner.variantSets.get(setName) ?? new Map();
+    owner.variantSets.set(setName, variants);
+    while (!this.peekPunct("}")) {
+      const name = this.expect("string").v;
+      if (this.peekPunct("(")) this.parseMetadata();
+      const body = { props: new Map(), children: [] };
+      this.parseBody(body, owner);
+      variants.set(name, body);
+    }
+    this.expectPunct("}");
   }
 
   parseProperty(prim) {
@@ -264,6 +288,21 @@ class Parser {
       if (t.t !== "ident") throw syntaxError(`Unexpected '${t.v}' in metadata`, t.line);
       let key = t.v;
       if (LIST_OPS.has(key)) key = `${key} ${this.expect("ident").v}`;
+      if (key === "variants" && this.peekPunct("=") && this.peekPunct("{", 1)) {
+        // Variant selections: variants = { string <set> = "<variant>" ... }
+        this.next(); this.next();
+        const sel = {};
+        while (!this.peekPunct("}")) {
+          this.expect("ident"); // string
+          const set = this.expect("ident").v;
+          this.expectPunct("=");
+          sel[set] = this.expect("string").v;
+          if (this.peekPunct(";") || this.peekPunct(",")) this.next();
+        }
+        this.next();
+        md.variants = sel;
+        continue;
+      }
       if (this.peekPunct("=")) {
         this.next();
         md[key] = this.parseValue();

@@ -50,6 +50,8 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
   `app.js` の `fixTextureTransforms()` で仕様どおりの行列に直してから左側に表示している
 - **新しい USD 機能を出力したら、`usd-preview.js` / `checks.js` もそれを読めるように更新する**
   （`UsdTransform2d`、`primvars:st1..3`、internal reference、xformOp の timeSamples、UsdSkel は対応済み）
+- variantSet があると選択 UI が出る。右は選択した variant の opinion を合成して再構築、左は GLTFLoader の parser で
+  KHR_materials_variants の対応どおりにマテリアルを差し替える（option の順 = default + glTF の順）
 - UsdLux は DirectionalLight / PointLight / SpotLight（−Z 向き、強さはそのまま）で表示
 - UsdSkel は `SkinnedMesh`（ボーンは Skeleton prim の親の下、boneInverses = inverse(bindTransforms)、bindMatrix = geomBindTransform、
   影響が 5 つ以上なら上位 4 つ）と morph 属性（`pointIndices` は全点に展開）で表示
@@ -79,6 +81,8 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
 - EXT_mesh_gpu_instancing → インスタンスごとに `xformOp:transform`（T·R·S）付きの Xform。メッシュのプロトタイプへの
   instanceable reference（`instancing: false` なら複製）。PointInstancer は AR Quick Look 等での対応が不確かなので使っていない。
   Khronos SimpleInstancing（125 個）で three.js の InstancedMesh とワールド行列が 5e-7 以内で一致
+- KHR_materials_variants → `/Root` の variantSet `materialVariant`（`default` + glTF の各バリアント、既定の選択は `default`）。
+  各 variant に `over` で Mesh の `material:binding`（対応がなければ既定マテリアル）。インスタンス化メッシュはプロトタイプを上書き
 - KHR_lights_punctual → UsdLux（directional → DistantLight、point → SphereLight + treatAsPoint、spot → + ShapingAPI。
   強さは glTF の lux / candela をそのまま。UsdLux は単位を明示していないので近似。range は警告。AR Quick Look はライトを無視する）
 - KHR_materials_unlit（近似: diffuseColor = 黒、baseColor → emissiveColor、`ior = 1` でフレネル反射を消す。他の PBR 入力は無視）
@@ -140,6 +144,9 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
    1 つの SkelAnimation を複数メッシュで共有できるようにする。three.js（getVertexPosition）と OpenUSD（UsdSkel の
    BlendShapeQuery + SkinningQuery）の変形後頂点を比較して、RiggedSimple / RiggedFigure / CesiumMan / Fox / AnimatedMorphCube /
    MorphPrimitivesTest / skinned.glb で相対 1e-6 以内。
+14. **material variants では、対象 Mesh に binding を直接書かない。** USD の強さは LIVRPS で Local > Variant なので、
+   直接書くとどの variant でも上書きできない（OpenUSD で確認して判明）。代わりに `default` variant に既定マテリアルを入れて
+   選択しておく（glTF の「未選択」に相当）。各 variant は「対応付けがあればそのマテリアル、なければ既定マテリアル」。
 
 ## OpenUSD バリデータに指摘されて直した点（再発注意）
 

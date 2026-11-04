@@ -66,6 +66,8 @@ body.dragging .input { border-color: var(--accent); background: var(--surface-2)
 .btn.primary:hover { filter: brightness(1.08); }
 .btn img { display: none; }
 .check { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
+.variants { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 14px; }
+.variants select { font: inherit; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); }
 .anim { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .anim input[type="range"] { width: 200px; max-width: 50vw; accent-color: var(--accent); }
 .time-label { font-family: var(--mono); font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 9ch; }

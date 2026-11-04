@@ -73,6 +73,36 @@ export function runChecks(entries, layer) {
   }
   if (instances && !refProblems) ok(`instance ${instances} 個: reference 先はすべて存在する`);
 
+  // ---- Variants: every over must land on an existing prim, bindings on Materials ----
+  let variantCount = 0;
+  let variantProblems = 0;
+  const walkVariant = (body, path, where) => {
+    const binding = body.props.get("material:binding")?.value?.[0];
+    if (binding && prims.get(binding)?.type !== "Material") {
+      error(`${where}: ${path} の material:binding の参照先が Material ではない (${binding})`);
+      variantProblems++;
+    }
+    for (const child of body.children) {
+      const p = `${path}/${child.name}`;
+      if (child.specifier === "over" && !prims.has(p)) {
+        error(`${where}: over の対象 ${p} が存在しない`);
+        variantProblems++;
+      }
+      walkVariant(child, p, where);
+    }
+  };
+  for (const prim of traverse(layer.prims)) {
+    for (const [set, variants] of prim.variantSets ?? []) {
+      for (const [name, body] of variants) {
+        variantCount++;
+        walkVariant(body, prim.path, `${prim.path}{${set}=${name}}`);
+      }
+      const sel = prim.metadata.variants?.[set];
+      if (sel !== undefined && !variants.has(sel)) { error(`${prim.path}: 選択中の variant "${sel}" が ${set} にない`); variantProblems++; }
+    }
+  }
+  if (variantCount && !variantProblems) ok(`variant ${variantCount} 個: over の対象と binding 先はすべて存在する`);
+
   // ---- UsdSkel ----
   let skeletons = 0;
   let skelProblems = 0;

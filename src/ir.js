@@ -44,6 +44,24 @@ export class Prim {
     this.props = [];
     /** @type {Prim[]} */
     this.children = [];
+    /** @type {Map<string, Map<string, Prim>>} variantSet → variant → container (props / child prims) */
+    this.variantSets = new Map();
+  }
+
+  /**
+   * Opinion container for one variant: add properties and (usually `over`)
+   * child prims to it; they apply when the variant is selected. Also lists the
+   * set in this prim's `prepend variantSets` metadata.
+   */
+  variant(setName, variantName) {
+    if (!this.variantSets.has(setName)) {
+      this.variantSets.set(setName, new Map());
+      const list = this.metadata["prepend variantSets"] ?? [];
+      this.metadata["prepend variantSets"] = [...list, setName];
+    }
+    const set = this.variantSets.get(setName);
+    if (!set.has(variantName)) set.set(variantName, new Prim("", variantName));
+    return set.get(variantName);
   }
 
   /**

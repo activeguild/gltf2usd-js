@@ -88,6 +88,59 @@ function frameCamera() {
   }
 }
 
+// ---------- Material variants (USD variantSet ↔ KHR_materials_variants) ----------
+
+let lastLayer = null;
+let lastEntries = null;
+const variantSelections = {};
+
+/**
+ * One select per variantSet. The converter writes "default" first and then the
+ * glTF variants in glTF order, so the option index maps to the glTF variant index.
+ */
+function renderVariantControls() {
+  const box = $("variants");
+  box.innerHTML = "";
+  const sets = usdPreview?.variantSets ?? [];
+  box.hidden = !sets.length;
+  for (const { set, variants, selection } of sets) {
+    const label = document.createElement("label");
+    label.textContent = `${set} `;
+    const select = document.createElement("select");
+    for (const v of variants) select.add(new Option(v, v, false, v === selection));
+    select.addEventListener("change", () => switchVariant(set, select.value, select.selectedIndex));
+    label.append(select);
+    box.append(label);
+  }
+}
+
+async function switchVariant(set, name, index) {
+  // Right: rebuild the USD preview with the new selection.
+  variantSelections[set] = name;
+  usdPreview?.dispose();
+  usdPreview = buildUsdScene(lastLayer, lastEntries, { variantSelections });
+  setContent(views[1], usdPreview.object);
+  applyAnimationTime();
+  // Left: apply the same glTF variant (option 0 is "default" = each primitive's own material).
+  if (set === "materialVariant" && lastGltf) await applyGltfVariant(index === 0 ? null : index - 1);
+}
+
+async function applyGltfVariant(variantIndex) {
+  const parser = lastGltf.parser;
+  const meshes = [];
+  lastGltf.scene.traverse((o) => { if (o.isMesh) meshes.push(o); });
+  for (const o of meshes) {
+    const a = parser.associations.get(o);
+    const prim = parser.json.meshes?.[a?.meshes]?.primitives?.[a?.primitives];
+    if (!prim) continue;
+    const mapping = variantIndex === null ? null
+      : prim.extensions?.KHR_materials_variants?.mappings?.find((m) => m.variants.includes(variantIndex));
+    const index = mapping ? mapping.material : prim.material;
+    if (index !== undefined) o.material = await parser.getDependency("material", index);
+  }
+  applyWireframe();
+}
+
 // ---------- Animation playback (both views share one clock, in seconds) ----------
 
 let anim = null; // { mixer, start, end, tcps, t, playing }
@@ -224,6 +277,8 @@ async function run(glb, name, resources = new Map()) {
   anim = null;
   lastGltf = null;
   $("anim").hidden = true;
+  $("variants").hidden = true;
+  for (const k of Object.keys(variantSelections)) delete variantSelections[k];
 
   // 1) Convert
   const converterWarnings = [];
@@ -265,6 +320,8 @@ async function run(glb, name, resources = new Map()) {
   if (layer) {
     try {
       usdPreview = buildUsdScene(layer, entries);
+      lastLayer = layer;
+      lastEntries = entries;
       previewWarnings = usdPreview.warnings;
       setContent(views[1], usdPreview.object);
       overlay("usd", null);
@@ -279,6 +336,7 @@ async function run(glb, name, resources = new Map()) {
   }
   frameCamera();
   setupAnimation();
+  renderVariantControls();
 
   // 5) Downloads
   const base = name.replace(/\.(glb|gltf)$/i, "") || "model";
