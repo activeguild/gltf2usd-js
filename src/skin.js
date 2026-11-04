@@ -307,8 +307,7 @@ export function skinningPrimvars(ctx, plan, prim, vertexCount, meshName) {
         slots.push([w ? plan.remap[J[v * 4 + c]] ?? 0 : 0, w]);
       }
     });
-    // Heaviest influence first (stable). glTF allows any order, but Quick Look does not play
-    // a skin whose vertices start with a zero-weight slot (under test).
+    // Heaviest influence first (stable). glTF allows any order; the deformation is unchanged.
     slots.sort((a, b) => b[1] - a[1]);
     slots.forEach(([j, w], i) => {
       indices[v * elementSize + i] = j;

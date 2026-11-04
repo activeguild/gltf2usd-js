@@ -85,7 +85,8 @@ GLB を選ぶかドロップすると（またはサンプルボタンで）、�
 - アニメーション（1 本）: 既定ではノードのアニメーションもスケルトン（UsdSkel）に変換（AR Quick Look などは xformOp の
   アニメーションを再生しないため）。`{ animationMode: "xform" }` で TRS を `xformOp:translate` / `orient` / `scale` の timeSamples に。LINEAR / STEP / CUBICSPLINE
   （STEP は保持サンプル、CUBICSPLINE は 24fps でベイク）。`{ animation: index | name }` で選択
-- スキン → UsdSkel（SkelRoot / Skeleton / SkelAnimation、jointIndices / jointWeights）
+- スキン → UsdSkel（SkelRoot / Skeleton / SkelAnimation、jointIndices / jointWeights）。スキンの入れ物は `/Root/Skins/Skin_<名前>`
+  （Mac の Quick Look は入れ物の名前が `Rig` だと再生しなかったため、glTF の名前をそのまま使わない）
 - モーフターゲット → BlendShape（ウェイトの固定値とアニメーション。スキンなしでも可）
 - 複数ノードで共有されるメッシュの instancing（`/Root/Meshes` のプロトタイプを `instanceable` で参照。`{ instancing: false }` で複製）
 - `options.onWarning` で、変換で捨てた情報を通知（CLI は標準エラーに出力）

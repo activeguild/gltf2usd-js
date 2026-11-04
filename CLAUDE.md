@@ -82,7 +82,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
 - `animationMode: "xform"` のときのアニメーション（1 本）: translation / rotation / scale → `xformOp:translate` / `orient` / `scale` の timeSamples。
   LINEAR はそのまま、STEP は次キーの直前（-0.001 timecode）に同値を足して保持、CUBICSPLINE は 24fps + 全キーでベイク。
   `startTimeCode` / `endTimeCode` / `timeCodesPerSecond = framesPerSecond = 24`
-- スキン → `/Root/Skins/<Skin>`（Xform。`/Root` が SkelRoot）に Skeleton（子に SkelAnimation）/ メッシュ。JOINTS_n / WEIGHTS_n すべて（elementSize = 4n）
+- スキン → `/Root/Skins/Skin_<Skin>`（Xform。`/Root` が SkelRoot）に Skeleton（子に SkelAnimation）/ メッシュ。JOINTS_n / WEIGHTS_n すべて（elementSize = 4n）
 - モーフターゲット → Mesh 子の `BlendShape`（offsets / normalOffsets、疎なら pointIndices）。スキンなしのメッシュは
   ノードの下に専用 SkelRoot（ジョイント 0 個の Skeleton）。ウェイトは node.weights / mesh.weights と weights アニメーション
 - EXT_mesh_gpu_instancing → インスタンスごとに `xformOp:transform`（T·R·S）付きの Xform。メッシュのプロトタイプへの
@@ -169,6 +169,11 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
    （USDA でも再生される＝形式は無関係）。各スケルトンの入れ物は Xform、SkelAnimation は Skeleton の子、剛体バインドの
    jointIndices / Weights は頂点ごと。Apple の見本（toy_drummer / hummingbird）と同じ構成で、hummingbird は 1 つの SkelRoot に
    Skeleton が 2 つある。
+18. **スキンの入れ物の名前は常に `Skin_` を付ける。** Mac の Quick Look は、Skeleton を入れた Xform の名前が `Rig` だと
+   スキンを再生しなかった（データも構成も同じまま、その prim の名前だけ `Armature` / `Body` に変えると再生された）。
+   同じ名前をメッシュや `/Root/Scene` のノードに付けても問題はない。ほかに再生を妨げる名前があるかは不明なので、glTF のスキン名は
+   そのまま使わない。各頂点のウェイトを重い順に並べるのは、この調査の途中で入れた変更で、Quick Look の再生には無関係だった
+   （変形は変わらないので残している）。
 
 
 ## OpenUSD バリデータに指摘されて直した点（再発注意）
