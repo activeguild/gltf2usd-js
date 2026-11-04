@@ -4,3 +4,4 @@ test/features.glb
 *.usdz
 *.usda
 !test/fixtures/*
+test/gltf/

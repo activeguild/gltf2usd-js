@@ -1,12 +1,18 @@
 // Public API: works in browsers and Node (ESM).
-import { parseGLB, GltfAsset } from "./glb.js";
+import { parseGLB, parseGltf, GltfAsset, resolveResource } from "./glb.js";
 import { gltfToUsda } from "./usda.js";
 import { packUsdz } from "./usdz.js";
 
-export { parseGLB, GltfAsset, gltfToUsda, packUsdz };
+export { parseGLB, parseGltf, GltfAsset, resolveResource, gltfToUsda, packUsdz };
 
 /**
- * GLB (ArrayBuffer | Uint8Array) → { usda: string, files: {name, bytes}[] }
+ * glTF → { usda: string, files: {name, bytes}[] }
+ *
+ * input: GLB or .gltf bytes (ArrayBuffer | Uint8Array), .gltf JSON text (string),
+ *   or an already parsed glTF JSON object.
+ * options.resources: files referenced by non-data: uris (external .bin / images),
+ *   as a Map or object keyed by uri, or a function (uri) => bytes. Lookup tries the
+ *   uri as written, percent-decoded, and its bare file name.
  * options.onWarning(msg): called once per kind of glTF data that was dropped
  *   (unsupported extensions, primitive modes, animations, unresolvable images, ...).
  * options.texturePrefix: folder for packaged textures (default "textures/").
@@ -14,21 +20,23 @@ export { parseGLB, GltfAsset, gltfToUsda, packUsdz };
  *   to a prototype under /Root/Meshes (default true; false duplicates them).
  */
 export function glbToUsda(input, options = {}) {
-  const asset = new GltfAsset(parseGLB(toArrayBuffer(input)));
+  const asset = new GltfAsset(parseInput(input), { resources: options.resources });
   return gltfToUsda(asset, options);
 }
 
-/** GLB (ArrayBuffer | Uint8Array) → USDZ bytes (Uint8Array) */
+/** Same input and options as glbToUsda → USDZ bytes (Uint8Array). */
 export function glbToUsdz(input, options = {}) {
   const layerName = options.layerName ?? "model.usda";
   const { usda, files } = glbToUsda(input, options);
   return packUsdz([{ name: layerName, bytes: new TextEncoder().encode(usda) }, ...files]);
 }
 
-function toArrayBuffer(input) {
-  if (input instanceof ArrayBuffer) return input;
+function parseInput(input) {
+  if (typeof input === "string") return { json: JSON.parse(input), bin: null };
+  if (input instanceof ArrayBuffer) return parseGltf(input);
   if (ArrayBuffer.isView(input)) {
-    return input.buffer.slice(input.byteOffset, input.byteOffset + input.byteLength);
+    return parseGltf(input.buffer.slice(input.byteOffset, input.byteOffset + input.byteLength));
   }
-  throw new Error("Expected ArrayBuffer or Uint8Array");
+  if (input && typeof input === "object" && input.asset) return { json: input, bin: null };
+  throw new Error("Expected GLB / glTF bytes (ArrayBuffer or Uint8Array), glTF JSON text, or a glTF object");
 }

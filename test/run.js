@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { glbToUsda, glbToUsdz } from "../src/index.js";
+import { buildCubeGltf } from "./cube-glb.js";
 
 const glb = readFileSync(new URL("./cube.glb", import.meta.url));
 const { usda, files } = glbToUsda(glb);
@@ -94,6 +95,32 @@ assert(glbToUsda(features).usda === f.usda, "onWarning does not change output");
 assert(!f.usda.includes("Meshes"), "no prototypes without shared meshes");
 // Mesh prim and child node share a namespace.
 assert(f.usda.includes('def Mesh "CubeC"') && f.usda.includes('def Xform "CubeC_1"'), "mesh / child name collision resolved");
+
+// ---- .gltf with external files ----
+{
+  const { gltf, resources } = buildCubeGltf();
+  // Same content as cube.glb, so the output must be identical.
+  const fromGltf = glbToUsda(gltf, { resources });
+  assert(fromGltf.usda === usda, ".gltf text + resources object == GLB output");
+  assert(fromGltf.files.length === 1 && fromGltf.files[0].name === "textures/red.png", "external image packaged (sniffed PNG)");
+  assert(glbToUsda(new TextEncoder().encode(gltf), { resources: new Map(Object.entries(resources)) }).usda === usda, ".gltf bytes + Map");
+  assert(glbToUsda(JSON.parse(gltf), { resources: (uri) => resources[uri] }).usda === usda, "glTF object + resolver function");
+  // Browser drops are flat: bare file names must resolve too.
+  const flat = { "cube.bin": resources["cube.bin"], "red png.png": resources["textures/red png.png"] };
+  assert(glbToUsda(gltf, { resources: flat }).files.length === 1, "bare file name fallback");
+
+  // Missing buffer → clear error; missing image → warning, no texture.
+  let err = null;
+  try { glbToUsda(gltf); } catch (e) { err = e; }
+  assert(err && err.message.includes('"cube.bin" was not provided'), `missing buffer error: ${err?.message}`);
+  const w = [];
+  const noImage = glbToUsda(gltf, { resources: { "cube.bin": resources["cube.bin"] }, onWarning: (m) => w.push(m) });
+  assert(noImage.files.length === 0 && w.some((m) => m.includes("textures/red%20png.png")), "missing image is a warning");
+
+  let notGltf = null;
+  try { glbToUsda(new TextEncoder().encode("hello")); } catch (e) { notGltf = e; }
+  assert(notGltf?.message.includes("neither a GLB nor glTF"), "garbage input error");
+}
 
 // Cube has nothing to warn about.
 const cubeWarnings = [];

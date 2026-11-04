@@ -43,7 +43,7 @@ export function buildFeatureGlb() {
   const uv1 = cubeUvs().map((v) => v * 0.5);
   const { bin, views } = cubeBin([
     new Uint8Array(new Float32Array(uv1).buffer), // bufferView 5
-    pad4(quadrantPng()), // bufferView 6
+    quadrantPng(), // bufferView 6
   ]);
   return packGlb({
     asset: { version: "2.0", generator: "test-features" },
@@ -113,6 +113,26 @@ export function buildFeatureGlb() {
   }, bin);
 }
 
+/**
+ * The cube as a .gltf with external files: buffer "cube.bin" and the image at
+ * "textures/red%20png.png" (percent-encoded, no mimeType → sniffed).
+ * @returns {{ gltf: string, resources: Record<string, Uint8Array> }}
+ */
+export function buildCubeGltf() {
+  const glb = buildCubeGlb();
+  const dv = new DataView(glb.buffer, glb.byteOffset, glb.byteLength);
+  const jsonLength = dv.getUint32(12, true);
+  const json = JSON.parse(new TextDecoder().decode(glb.subarray(20, 20 + jsonLength)));
+  const bin = glb.subarray(20 + jsonLength + 8);
+  const png = base64ToBytes(PNG_BASE64);
+  json.buffers[0].uri = "cube.bin";
+  json.images[0] = { uri: "textures/red%20png.png", name: "red" };
+  return {
+    gltf: JSON.stringify(json, null, 2),
+    resources: { "cube.bin": bin, "textures/red png.png": png },
+  };
+}
+
 const CUBE_ACCESSORS = [
   { bufferView: 0, componentType: 5126, count: 24, type: "VEC3", min: [-0.5, -0.5, -0.5], max: [0.5, 0.5, 0.5] },
   { bufferView: 1, componentType: 5126, count: 24, type: "VEC3" },
@@ -160,17 +180,20 @@ function cubeBin(extra = []) {
     new Uint8Array(new Float32Array(P).buffer),
     new Uint8Array(new Float32Array(N).buffer),
     new Uint8Array(new Float32Array(UV).buffer),
-    pad4(new Uint8Array(new Uint16Array(I).buffer)),
-    pad4(png),
+    new Uint8Array(new Uint16Array(I).buffer),
+    png,
     ...extra,
   ];
+  // Each bufferView has its exact length; padding to 4 bytes sits between views.
   let off = 0;
   const views = [];
+  const padded = [];
   for (const p of parts) {
     views.push({ buffer: 0, byteOffset: off, byteLength: p.length });
-    off += p.length;
+    padded.push(pad4(p));
+    off += padded[padded.length - 1].length;
   }
-  return { bin: concat(parts), views };
+  return { bin: concat(padded), views };
 }
 
 function packGlb(json, bin) {

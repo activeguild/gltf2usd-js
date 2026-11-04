@@ -19,6 +19,23 @@ const TYPE_COUNT = {
 };
 
 /**
+ * Parse either a GLB or a .gltf (JSON text) ArrayBuffer into { json, bin }.
+ * bin is the GLB BIN chunk as a Uint8Array, or null.
+ */
+export function parseGltf(arrayBuffer) {
+  if (arrayBuffer.byteLength >= 4 && new DataView(arrayBuffer).getUint32(0, true) === GLB_MAGIC) {
+    return parseGLB(arrayBuffer);
+  }
+  let json;
+  try {
+    json = JSON.parse(new TextDecoder().decode(arrayBuffer));
+  } catch {
+    throw new Error("Input is neither a GLB nor glTF JSON");
+  }
+  return { json, bin: null };
+}
+
+/**
  * Parse a GLB ArrayBuffer into { json, bin } where bin is a Uint8Array (may be null).
  */
 export function parseGLB(arrayBuffer) {
@@ -50,9 +67,15 @@ export function parseGLB(arrayBuffer) {
  * Thin wrapper giving typed access to glTF buffers / bufferViews / accessors / images.
  */
 export class GltfAsset {
-  constructor({ json, bin }) {
+  /**
+   * @param {{json: object, bin: Uint8Array|null}} parsed
+   * @param {object} [options]
+   * @param {ResourceSource} [options.resources]  external files referenced by uri (see resolveResource)
+   */
+  constructor({ json, bin }, { resources } = {}) {
     this.json = json;
     this.bin = bin;
+    this._resources = resources;
     this._buffers = (json.buffers || []).map((b, i) => this._loadBuffer(b, i));
   }
 
@@ -62,7 +85,14 @@ export class GltfAsset {
       return this.bin;
     }
     if (buffer.uri.startsWith("data:")) return decodeDataUri(buffer.uri);
-    throw new Error(`External buffer uri not supported: ${buffer.uri}`);
+    const bytes = resolveResource(this._resources, buffer.uri);
+    if (!bytes) {
+      throw new Error(`External buffer "${buffer.uri}" was not provided (pass it in options.resources)`);
+    }
+    if (bytes.byteLength < (buffer.byteLength ?? 0)) {
+      throw new Error(`External buffer "${buffer.uri}" is ${bytes.byteLength} bytes, expected ${buffer.byteLength}`);
+    }
+    return bytes;
   }
 
   /** Raw bytes of a bufferView. */
@@ -141,8 +171,43 @@ export class GltfAsset {
       const mimeType = img.uri.slice(5, img.uri.indexOf(";"));
       return { bytes: decodeDataUri(img.uri), mimeType };
     }
+    if (img.uri) {
+      const bytes = resolveResource(this._resources, img.uri);
+      if (!bytes) return null;
+      return { bytes, mimeType: img.mimeType ?? sniffImageType(bytes) };
+    }
     return null;
   }
+}
+
+/**
+ * @typedef {Map<string, ArrayBuffer|Uint8Array> | Record<string, ArrayBuffer|Uint8Array>
+ *   | ((uri: string) => ArrayBuffer|Uint8Array|null|undefined)} ResourceSource
+ *
+ * Look up an external uri. Keys are tried as written, percent-decoded, and as
+ * a bare file name (handy for files dropped into a browser without folders).
+ * @returns {Uint8Array|null}
+ */
+export function resolveResource(resources, uri) {
+  if (!resources) return null;
+  let decoded = uri;
+  try { decoded = decodeURIComponent(uri); } catch { /* keep as written */ }
+  const candidates = [...new Set([uri, decoded, decoded.split("/").pop()])];
+  for (const key of candidates) {
+    let v;
+    if (typeof resources === "function") v = resources(key);
+    else if (resources instanceof Map) v = resources.get(key);
+    else v = Object.prototype.hasOwnProperty.call(resources, key) ? resources[key] : undefined;
+    if (v) return v instanceof Uint8Array ? v : new Uint8Array(v.buffer ?? v, v.byteOffset ?? 0, v.byteLength);
+  }
+  return null;
+}
+
+/** Identify PNG / JPEG from magic bytes (external images may lack mimeType). */
+function sniffImageType(bytes) {
+  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return "image/png";
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  return undefined;
 }
 
 function componentReader(dv, componentType) {
@@ -165,13 +230,10 @@ function decodeDataUri(uri) {
   return base64ToBytes(payload);
 }
 
+// atob is available in browsers and Node >= 16; src/ must not use Node's Buffer.
 function base64ToBytes(b64) {
-  if (typeof atob === "function") {
-    const s = atob(b64);
-    const out = new Uint8Array(s.length);
-    for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
-    return out;
-  }
-  // Node without atob (very old) fallback
-  return new Uint8Array(Buffer.from(b64, "base64"));
+  const s = atob(b64);
+  const out = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+  return out;
 }

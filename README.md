@@ -19,11 +19,14 @@ const url = URL.createObjectURL(new Blob([usdz], { type: "model/vnd.usdz+zip" })
 // USDA テキストだけ欲しい場合
 const { usda, files } = glbToUsda(buf);          // files = テクスチャ等 {name, bytes}[]
 
+// .gltf + 外部ファイル（.bin / 画像）。resources は Map / オブジェクト / (uri) => bytes のどれでもよい
+const usdz2 = glbToUsdz(gltfText, { resources: { "scene.bin": binBytes, "textures/base.png": pngBytes } });
+
 // 変換で捨てた情報（未対応の拡張・プリミティブ・アニメーション等）を受け取る
 glbToUsdz(buf, { onWarning: (msg) => console.warn(msg) });
 ```
 
-CLI: `node cli.js in.glb out.usdz` (`.usda` を指定すればテキスト出力)
+CLI: `node cli.js in.glb out.usdz`（`.usda` を指定すればテキスト出力。`in.gltf` なら同じフォルダの外部ファイルを読む）
 
 テスト: `npm test`（テスト用 GLB の生成も含む）
 
@@ -62,6 +65,7 @@ GLB を選ぶかドロップすると（またはサンプルボタンで）、�
 ## 現在対応しているもの（段階 1）
 
 - GLB ヘッダ / JSON / BIN チャンク、data URI バッファ
+- `.gltf` と外部 `.bin` / 画像（`options.resources`）
 - ノード階層、TRS または matrix（`xformOp:transform`）
 - TRIANGLES / TRIANGLE_STRIP / TRIANGLE_FAN、インデックス有無どちらも可
 - POSITION / NORMAL / TEXCOORD_0（V 反転済み）/ COLOR_0（displayColor）

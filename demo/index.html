@@ -25,12 +25,13 @@
   <main>
     <section class="input" id="drop">
       <label class="btn primary">
-        GLB を選ぶ
-        <input type="file" id="file" accept=".glb,model/gltf-binary" hidden>
+        GLB / glTF を選ぶ
+        <input type="file" id="file" accept=".glb,.gltf,.bin,.png,.jpg,.jpeg,model/gltf-binary,model/gltf+json" multiple hidden>
       </label>
       <button class="btn" id="sample" type="button">サンプル: テクスチャ付きキューブ</button>
       <button class="btn" id="sample-features" type="button">サンプル: 段階 2 の機能</button>
-      <span class="hint">またはこのページに .glb をドロップ</span>
+      <button class="btn" id="sample-gltf" type="button">サンプル: .gltf + 外部ファイル</button>
+      <span class="hint">またはこのページにドロップ（.gltf は .bin や画像も一緒に選ぶ / ドロップする）</span>
       <span class="filename" id="filename"></span>
     </section>
 

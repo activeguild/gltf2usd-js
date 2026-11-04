@@ -3,8 +3,8 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 
-import { glbToUsdz } from "../src/index.js";
-import { buildCubeGlb, buildFeatureGlb } from "../test/cube-glb.js";
+import { glbToUsdz, parseGltf, resolveResource } from "../src/index.js";
+import { buildCubeGlb, buildCubeGltf, buildFeatureGlb } from "../test/cube-glb.js";
 import { readUsdz } from "./usdz-reader.js";
 import { parseUsda, traverse, primReferences } from "./usda-parser.js";
 import { runChecks } from "./checks.js";
@@ -110,11 +110,14 @@ $("reset-cam").addEventListener("click", frameCamera);
 // ---------- Input ----------
 
 $("file").addEventListener("change", (e) => {
-  const f = e.target.files[0];
-  if (f) loadFile(f);
+  if (e.target.files.length) loadFiles([...e.target.files]);
 });
 $("sample").addEventListener("click", () => run(buildCubeGlb(), "sample-cube.glb"));
 $("sample-features").addEventListener("click", () => run(buildFeatureGlb(), "sample-features.glb"));
+$("sample-gltf").addEventListener("click", () => {
+  const { gltf, resources } = buildCubeGltf();
+  run(new TextEncoder().encode(gltf), "cube.gltf", new Map(Object.entries(resources)));
+});
 
 let dragDepth = 0;
 addEventListener("dragenter", (e) => { e.preventDefault(); dragDepth++; document.body.classList.add("dragging"); });
@@ -124,12 +127,24 @@ addEventListener("drop", (e) => {
   e.preventDefault();
   dragDepth = 0;
   document.body.classList.remove("dragging");
-  const f = e.dataTransfer.files[0];
-  if (f) loadFile(f);
+  if (e.dataTransfer.files.length) loadFiles([...e.dataTransfer.files]);
 });
 
-async function loadFile(file) {
-  run(new Uint8Array(await file.arrayBuffer()), file.name);
+/** One .glb / .gltf plus, for .gltf, its external .bin and images (matched by file name). */
+async function loadFiles(files) {
+  const main = files.find((f) => /\.(glb|gltf)$/i.test(f.name));
+  if (!main) {
+    showError(".glb か .gltf ファイルを含めてください");
+    return;
+  }
+  const resources = new Map();
+  for (const f of files) {
+    if (f === main) continue;
+    const bytes = new Uint8Array(await f.arrayBuffer());
+    resources.set(f.name, bytes);
+    if (f.webkitRelativePath) resources.set(f.webkitRelativePath.split("/").slice(1).join("/"), bytes);
+  }
+  run(new Uint8Array(await main.arrayBuffer()), main.name, resources);
 }
 
 // ---------- Conversion ----------
@@ -137,8 +152,9 @@ async function loadFile(file) {
 let urls = [];
 let usdPreview = null;
 
-async function run(glb, name) {
-  $("filename").textContent = `${name} (${fmtBytes(glb.length)})`;
+async function run(glb, name, resources = new Map()) {
+  const extra = resources.size ? ` + ${resources.size} ファイル` : "";
+  $("filename").textContent = `${name} (${fmtBytes(glb.length)})${extra}`;
   showError(null);
   urls.forEach((u) => URL.revokeObjectURL(u));
   urls = [];
@@ -150,14 +166,16 @@ async function run(glb, name) {
   let usdz, ms;
   try {
     const t0 = performance.now();
-    usdz = glbToUsdz(glb, { onWarning: (msg) => converterWarnings.push(msg) });
+    usdz = glbToUsdz(glb, { resources, onWarning: (msg) => converterWarnings.push(msg) });
     ms = performance.now() - t0;
   } catch (err) {
-    showError(`変換に失敗しました: ${err.message}`);
+    const hint = /was not provided/.test(err.message) ? "\n.gltf が参照する .bin / 画像も一緒に選んでください。" : "";
+    showError(`変換に失敗しました: ${err.message}${hint}`);
+    for (const id of ["stats", "actions", "panel"]) $(id).hidden = true;
     console.error(err);
     setContent(views[1], null);
     overlay("usd", "変換に失敗しました", true);
-    await showGltf(glb);
+    await showGltf(glb, resources);
     return;
   }
 
@@ -178,7 +196,7 @@ async function run(glb, name) {
     : runChecks(entries, layer);
 
   // 4) Previews
-  await showGltf(glb);
+  await showGltf(glb, resources);
   let previewWarnings = [];
   if (layer) {
     try {
@@ -198,7 +216,7 @@ async function run(glb, name) {
   frameCamera();
 
   // 5) Downloads
-  const base = name.replace(/\.glb$/i, "") || "model";
+  const base = name.replace(/\.(glb|gltf)$/i, "") || "model";
   const usdzUrl = URL.createObjectURL(new Blob([usdz], { type: "model/vnd.usdz+zip" }));
   const usdaUrl = URL.createObjectURL(new Blob([usdaText ?? ""], { type: "text/plain" }));
   urls.push(usdzUrl, usdaUrl);
@@ -210,7 +228,8 @@ async function run(glb, name) {
   $("actions").hidden = false;
 
   // 6) Panels
-  renderStats({ glb, usdz, usdaText, ms, layer, entries });
+  const inputSize = glb.length + [...new Set(resources.values())].reduce((n, b) => n + b.length, 0);
+  renderStats({ inputSize, usdz, usdaText, ms, layer, entries });
   renderChecks(checks, converterWarnings, previewWarnings);
   renderUsda(usdaText ?? "");
   renderTree(layer);
@@ -219,10 +238,24 @@ async function run(glb, name) {
   $("panel").hidden = false;
 }
 
-function showGltf(glb) {
+function showGltf(glb, resources) {
   return new Promise((resolve) => {
     const buf = glb.buffer.slice(glb.byteOffset, glb.byteOffset + glb.byteLength);
-    new GLTFLoader().parse(buf, "", (gltf) => {
+    // Serve a .gltf's external files from the selected files, using the same lookup as the converter.
+    const manager = new THREE.LoadingManager();
+    const blobUrls = new Map();
+    manager.setURLModifier((url) => {
+      if (/^(data|blob):/.test(url)) return url;
+      const bytes = resolveResource(resources, url);
+      if (!bytes) return url;
+      if (!blobUrls.has(bytes)) {
+        const u = URL.createObjectURL(new Blob([bytes]));
+        blobUrls.set(bytes, u);
+        urls.push(u);
+      }
+      return blobUrls.get(bytes);
+    });
+    new GLTFLoader(manager).parse(buf, "", (gltf) => {
       fixTextureTransforms(gltf.scene);
       setContent(views[0], gltf.scene);
       overlay("gltf", null);
@@ -272,7 +305,7 @@ function showError(msg) {
   $("error").textContent = msg ?? "";
 }
 
-function renderStats({ glb, usdz, usdaText, ms, layer, entries }) {
+function renderStats({ inputSize, usdz, usdaText, ms, layer, entries }) {
   const counts = {};
   let instances = 0;
   if (layer) {
@@ -282,7 +315,7 @@ function renderStats({ glb, usdz, usdaText, ms, layer, entries }) {
     }
   }
   const items = [
-    [fmtBytes(glb.length), "入力 GLB"],
+    [fmtBytes(inputSize), "入力"],
     [fmtBytes(usdz.length), "USDZ"],
     [fmtBytes(new TextEncoder().encode(usdaText ?? "").length), "うち USDA"],
     [`${ms.toFixed(1)} ms`, "変換時間"],
@@ -350,8 +383,7 @@ function renderPackage(entries) {
 function renderGltf(glb) {
   let json;
   try {
-    const dv = new DataView(glb.buffer, glb.byteOffset, glb.byteLength);
-    json = JSON.parse(new TextDecoder().decode(glb.subarray(20, 20 + dv.getUint32(12, true))));
+    json = parseGltf(glb.buffer.slice(glb.byteOffset, glb.byteOffset + glb.byteLength)).json;
   } catch {
     $("tab-gltf").innerHTML = '<p class="hint">JSON チャンクを読めませんでした</p>';
     return;

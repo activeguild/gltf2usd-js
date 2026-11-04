@@ -18,10 +18,11 @@ OpenUSD 26.11 の全 30 バリデータに通して error 0 を確認済み。
 | `src/glb.js`  | `parseGLB()`, `GltfAsset` | accessor デコード（byteStride / normalized / sparse 対応）、`imageBytes()` |
 | `src/usda.js` | `gltfToUsda(asset, opts)` → `{ usda, files }` | ノード階層、Mesh、UsdPreviewSurface |
 | `src/usdz.js` | `packUsdz(entries)` → `Uint8Array` | stored-only zip、64 バイトアライン、CRC32 自前 |
-| `src/index.js`| `glbToUsda()`, `glbToUsdz()` | 公開 API |
-| `cli.js`      | `node cli.js in.glb out.usdz\|out.usda` | |
+| `src/index.js`| `glbToUsda()`, `glbToUsdz()` | 公開 API。名前は glb だが `.gltf` も受け付ける |
+| `cli.js`      | `node cli.js in.glb\|in.gltf out.usdz\|out.usda` | `.gltf` の外部ファイルは同じフォルダ以下からのみ読む |
 | `test/cube-glb.js` | テスト用 GLB をメモリ上で生成（Node / ブラウザ共用） | `buildCubeGlb()`（段階 1）、`buildFeatureGlb()`（段階 2 の機能） |
-| `test/make-glb.js` | `test/cube.glb` を書き出す | |
+| `test/make-glb.js` | `test/cube.glb`、`test/features.glb`、`test/gltf/`（外部ファイル付き .gltf）を書き出す | |
+| `test/png.js` | テスト画像用の小さな PNG エンコーダ | |
 | `test/run.js` | JS 側の単体テスト（prim 名、zip アライン検証） | `npm test` |
 | `test/validate.py` | OpenUSD で開いてバリデータ実行 | `pip install usd-core` が必要 |
 | `demo/` | Web テストアプリ（`npm run demo` → `http://localhost:8080/demo/`） | 下記 |
@@ -43,6 +44,8 @@ OpenUSD 26.11 の全 30 バリデータに通して error 0 を確認済み。
 
 ### 対応済み
 - GLB ヘッダ / JSON / BIN チャンク、`data:` URI のバッファと画像
+- `.gltf`（JSON テキスト / オブジェクト）と外部 `.bin`・画像（`options.resources`。uri そのまま → percent-decode → ファイル名だけ、の順で探す。
+  見つからないバッファは throw、画像は警告してテクスチャなし。mimeType がない画像はマジックバイトで PNG / JPEG 判定）
 - ノード階層 → `Xform`、TRS または `matrix` → `xformOp:transform`
 - TRIANGLES / STRIP / FAN、インデックス有無
 - POSITION / NORMAL / TEXCOORD_0（V 反転）/ COLOR_0（`primvars:displayColor`）
@@ -62,7 +65,6 @@ OpenUSD 26.11 の全 30 バリデータに通して error 0 を確認済み。
 - KHR_materials_transmission / volume / specular / sheen / unlit など（警告）、KHR_mesh_quantization（normalized は読めるので一部は動く）
 - POINTS / LINES プリミティブ（スキップして警告）
 - アニメーション、スキン、モーフターゲット、カメラ、ライト
-- 外部ファイル参照の `.gltf`（`uri` が data: 以外だと throw）
 - USDC（Crate）出力
 
 ## 重要な設計判断（変えるときは理由を README にも書くこと）
@@ -121,7 +123,7 @@ npm run demo                               # 見た目の確認: サンプルと
 - [ ] KHR_materials_transmission: UsdPreviewSurface に対応入力がないので現状は警告のみ。`opacity = 1 - transmission` で
       近似するかは要相談（ガラスが消えて見える副作用がある）
 - [x] sampler の wrapS/wrapT（REPEAT / CLAMP_TO_EDGE / MIRRORED_REPEAT → `repeat` / `clamp` / `mirror`）
-- [ ] 外部 `.gltf` 入力（Node なら隣接ファイル、ブラウザなら `File[]` を受け取る resolver を注入）
+- [x] 外部 `.gltf` 入力（`options.resources` = Map / object / `(uri) => bytes`。CLI は隣接ファイル、デモは複数ファイル選択）
 - [x] 画像名の衝突回避（同名画像が複数ある場合）。大文字小文字を区別せずに比較
 - [x] `options.onWarning`（`ctx.warn()`、同じ文言は 1 回だけ）。対応した拡張は `SUPPORTED_EXTENSIONS` に追加すること
 
