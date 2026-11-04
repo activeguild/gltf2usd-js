@@ -206,6 +206,97 @@ export function buildAnimatedGlb() {
   }, bin);
 }
 
+/**
+ * Stage 4: skinning and morph targets.
+ *  - "Bar": a 2-unit tall box (3 rings of 4 vertices) skinned to joints Lower / Upper.
+ *    skin.joints lists the child first (Upper, Lower) to test parent-first reordering;
+ *    the root joint sits under a non-joint "Armature" node with a translation; the
+ *    mesh node has its own translation, which glTF ignores for skinned meshes.
+ *    It also has a sparse morph target ("Bulge", top ring only), weight 0.5.
+ *  - "Bend": Upper rotates about Z (0° → 45° → 0°) and Bulge goes 0 → 1 → 0.
+ *  - "Blob": a morph-only cube (target "Grow" = top face up), static weight 0.25.
+ * @returns {Uint8Array} GLB bytes
+ */
+export function buildSkinnedGlb() {
+  const f32 = (a) => new Uint8Array(new Float32Array(a).buffer);
+  const P = [], J = [], W = [], I = [], BULGE = [];
+  for (let ring = 0; ring < 3; ring++) {
+    for (const [x, z] of [[-0.2, -0.2], [0.2, -0.2], [0.2, 0.2], [-0.2, 0.2]]) {
+      P.push(0.5 + x, ring, z);
+      // skin.joints = [Upper, Lower] → Lower is skin joint 1, Upper is skin joint 0
+      J.push(...[[1, 0, 0, 0], [1, 0, 0, 0], [0, 0, 0, 0]][ring]);
+      W.push(...[[1, 0, 0, 0], [0.5, 0.5, 0, 0], [1, 0, 0, 0]][ring]);
+      BULGE.push(...(ring === 2 ? [x * 1.5, 0, z * 1.5] : [0, 0, 0]));
+    }
+  }
+  for (let ring = 0; ring < 2; ring++) {
+    for (let k = 0; k < 4; k++) {
+      const a = ring * 4 + k, b = ring * 4 + ((k + 1) % 4), c = a + 4, d = b + 4;
+      I.push(a, b, d, a, d, c);
+    }
+  }
+  const grow = cubeGeometry().P.map((v, i) => (i % 3 === 1 && v > 0 ? 0.5 : 0)); // top face up
+  const deg = (d) => [0, 0, Math.sin((d * Math.PI) / 360), Math.cos((d * Math.PI) / 360)];
+  const extra = [
+    f32(P), new Uint8Array(J), f32(W), new Uint8Array(new Uint16Array(I).buffer), f32(BULGE), // views 5..9
+    // 10: IBMs in skin.joints order: Upper = inverse(T(0.5, 1, 0)), Lower = inverse(T(0.5, 0, 0))
+    f32([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, -0.5, -1, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, -0.5, 0, 0, 1]),
+    f32([0, 1, 2]), f32([...deg(0), ...deg(45), ...deg(0)]), f32([0, 1, 0]), // 11..13 animation
+    f32(grow), // 14 Grow target
+  ];
+  const { bin, views } = cubeBin(extra);
+  const acc = (bufferView, componentType, count, type, more = {}) => ({ bufferView, componentType, count, type, ...more });
+  return packGlb({
+    asset: { version: "2.0", generator: "test-skinned" },
+    scene: 0,
+    scenes: [{ nodes: [0, 3, 4] }],
+    nodes: [
+      { name: "Armature", translation: [0.5, 0, 0], children: [1] }, // 0 (non-joint ancestor)
+      { name: "Lower", children: [2] }, // 1
+      { name: "Upper", translation: [0, 1, 0] }, // 2
+      { name: "BarNode", mesh: 0, skin: 0, translation: [5, 0, 0] }, // 3 (translation ignored by skinning)
+      { name: "Blob", mesh: 1, translation: [3, 0, 0], weights: [0.25] }, // 4
+    ],
+    meshes: [
+      {
+        name: "Bar",
+        weights: [0.5],
+        extras: { targetNames: ["Bulge"] },
+        primitives: [{ attributes: { POSITION: 4, JOINTS_0: 5, WEIGHTS_0: 6 }, indices: 7, targets: [{ POSITION: 8 }] }],
+      },
+      {
+        name: "BlobMesh",
+        extras: { targetNames: ["Grow"] },
+        primitives: [{ attributes: { POSITION: 0, NORMAL: 1 }, indices: 3, targets: [{ POSITION: 13 }] }],
+      },
+    ],
+    skins: [{ name: "Rig", joints: [2, 1], inverseBindMatrices: 9, skeleton: 1 }],
+    accessors: [
+      ...CUBE_ACCESSORS, // 0..3
+      acc(5, 5126, 12, "VEC3", { min: [0.3, 0, -0.2], max: [0.7, 2, 0.2] }), // 4 Bar POSITION
+      acc(6, 5121, 12, "VEC4"), // 5 JOINTS_0
+      acc(7, 5126, 12, "VEC4"), // 6 WEIGHTS_0
+      acc(8, 5123, 48, "SCALAR"), // 7 indices
+      acc(9, 5126, 12, "VEC3", { min: [-0.3, 0, -0.3], max: [0.3, 0, 0.3] }), // 8 Bulge
+      acc(10, 5126, 2, "MAT4"), // 9 IBMs
+      acc(11, 5126, 3, "SCALAR", { min: [0], max: [2] }), // 10 times
+      acc(12, 5126, 3, "VEC4"), // 11 rotations
+      acc(13, 5126, 3, "SCALAR"), // 12 weights
+      acc(14, 5126, 24, "VEC3", { min: [0, 0, 0], max: [0, 0.5, 0] }), // 13 Grow
+    ],
+    bufferViews: views,
+    buffers: [{ byteLength: bin.length }],
+    animations: [{
+      name: "Bend",
+      samplers: [{ input: 10, output: 11 }, { input: 10, output: 12 }],
+      channels: [
+        { sampler: 0, target: { node: 2, path: "rotation" } },
+        { sampler: 1, target: { node: 3, path: "weights" } },
+      ],
+    }],
+  }, bin);
+}
+
 const CUBE_ACCESSORS = [
   { bufferView: 0, componentType: 5126, count: 24, type: "VEC3", min: [-0.5, -0.5, -0.5], max: [0.5, 0.5, 0.5] },
   { bufferView: 1, componentType: 5126, count: 24, type: "VEC3" },

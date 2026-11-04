@@ -10,9 +10,11 @@
 //                    (rotations are normalized after evaluation).
 // glTF times are seconds; time codes are seconds × TIME_CODES_PER_SECOND.
 
+import { slerp } from "./math.js";
+
 export const TIME_CODES_PER_SECOND = 24;
 const STEP_EPSILON = 1e-3; // time codes
-const PATH_SIZE = { translation: 3, rotation: 4, scale: 3 };
+const PATH_SIZE = { translation: 3, rotation: 4, scale: 3, weights: 0 }; // weights: one per morph target
 
 /**
  * Pick one glTF animation and evaluate it into node channels.
@@ -51,16 +53,16 @@ export function evaluateAnimation(ctx, which = 0) {
       ctx.warn(`Animation "${name}": a channel without target.node was skipped`);
       continue;
     }
-    if (target.path === "weights") {
-      ctx.warn(`Animation "${name}": morph target weights are not supported yet; skipped`);
-      continue;
-    }
-    if (!PATH_SIZE[target.path]) {
+    if (!(target.path in PATH_SIZE)) {
       ctx.warn(`Animation "${name}": unknown target path "${target.path}"; skipped`);
       continue;
     }
     const node = ctx.json.nodes?.[target.node];
     if (!node) continue;
+    if (target.path === "weights" && !(ctx.json.meshes?.[node.mesh]?.primitives || []).some((p) => p.targets?.length)) {
+      ctx.warn(`Animation "${name}": weights channel on node ${target.node}, whose mesh has no morph targets; skipped`);
+      continue;
+    }
     if (node.matrix) {
       ctx.warn(`Animation "${name}": node ${target.node} uses a matrix, which glTF does not allow to animate; skipped`);
       continue;
@@ -79,15 +81,27 @@ export function evaluateAnimation(ctx, which = 0) {
   return { name, startTimeCode: start, endTimeCode: end, nodes };
 }
 
+/**
+ * glTF seconds → time code. Key times are float32, so 1/24 s comes out as 0.999999...
+ * frames; values within 1e-4 of a whole frame snap to it (STEP_EPSILON is 1e-3).
+ */
+function toTimeCode(seconds) {
+  const tc = seconds * TIME_CODES_PER_SECOND;
+  const frame = Math.round(tc);
+  return Math.abs(tc - frame) < 1e-4 ? frame : Math.round(tc * 1e6) / 1e6;
+}
+
 /** @returns {[number, number[]][]} [timeCode, value] pairs */
 function evaluateSampler(ctx, sampler, path, animName) {
-  const size = PATH_SIZE[path];
   const times = ctx.asset.accessor(sampler.input).data;
   const out = ctx.asset.accessor(sampler.output).data;
   const interpolation = sampler.interpolation ?? "LINEAR";
+  // Morph weights have one value per target; derive the count from the accessors.
+  const perKey = interpolation === "CUBICSPLINE" ? 3 : 1;
+  const size = PATH_SIZE[path] || Math.round(out.length / (times.length * perKey)) || 1;
   const n = times.length;
   if (!n) return [];
-  const tc = (seconds) => Math.round(seconds * TIME_CODES_PER_SECOND * 1e6) / 1e6;
+  const tc = toTimeCode;
   const value = (i, stride = size, offset = 0) => Array.from(out.slice(i * stride + offset, i * stride + offset + size));
 
   if (interpolation === "LINEAR" || interpolation === "STEP") {
@@ -131,6 +145,27 @@ function evaluateSampler(ctx, sampler, path, animName) {
 
   ctx.warn(`Animation "${animName}": unknown interpolation ${interpolation}; skipped`);
   return [];
+}
+
+/**
+ * Value of a channel's [timeCode, value] samples at `time`: linear between
+ * samples (shortest-path slerp for rotations), clamped at the ends. STEP and
+ * CUBICSPLINE samples are already expanded, so this matches USD's evaluation.
+ */
+export function sampleAt(samples, time, path) {
+  if (time <= samples[0][0]) return samples[0][1];
+  const last = samples[samples.length - 1];
+  if (time >= last[0]) return last[1];
+  let lo = 0, hi = samples.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (samples[mid][0] <= time) lo = mid; else hi = mid;
+  }
+  const [t0, a] = samples[lo];
+  const [t1, b] = samples[hi];
+  const u = (time - t0) / (t1 - t0);
+  if (path === "rotation") return slerp(a, b, u);
+  return a.map((v, c) => v + (b[c] - v) * u);
 }
 
 function normalize(q) {

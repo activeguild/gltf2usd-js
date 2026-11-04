@@ -4,7 +4,7 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 
 import { glbToUsdz, parseGltf, resolveResource } from "../src/index.js";
-import { buildAnimatedGlb, buildCubeGlb, buildCubeGltf, buildFeatureGlb } from "../test/cube-glb.js";
+import { buildAnimatedGlb, buildCubeGlb, buildCubeGltf, buildFeatureGlb, buildSkinnedGlb } from "../test/cube-glb.js";
 import { readUsdz } from "./usdz-reader.js";
 import { parseUsda, traverse, primReferences } from "./usda-parser.js";
 import { runChecks } from "./checks.js";
@@ -174,6 +174,7 @@ $("file").addEventListener("change", (e) => {
 $("sample").addEventListener("click", () => run(buildCubeGlb(), "sample-cube.glb"));
 $("sample-features").addEventListener("click", () => run(buildFeatureGlb(), "sample-features.glb"));
 $("sample-anim").addEventListener("click", () => run(buildAnimatedGlb(), "sample-animated.glb"));
+$("sample-skin").addEventListener("click", () => run(buildSkinnedGlb(), "sample-skinned.glb"));
 $("sample-gltf").addEventListener("click", () => {
   const { gltf, resources } = buildCubeGltf();
   run(new TextEncoder().encode(gltf), "cube.gltf", new Map(Object.entries(resources)));

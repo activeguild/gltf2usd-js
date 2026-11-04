@@ -9,7 +9,13 @@
 //   /Root/Materials/<Mat>     (Material + UsdPreviewSurface + UsdUVTexture shaders)
 
 import { Layer, Prim } from "./ir.js";
+import { sanitize, uniqueName } from "./names.js";
+import { composeTRS } from "./math.js";
+
+export { sanitize };
 import { evaluateAnimation, TIME_CODES_PER_SECOND } from "./animation.js";
+import { planSkins, buildSkeleton, skinningPrimvars, NO_JOINTS } from "./skin.js";
+import { addBlendShapes, meshHasTargets, restWeights } from "./morph.js";
 
 const MODE_NAMES = ["POINTS", "LINES", "LINE_LOOP", "LINE_STRIP", "TRIANGLES", "TRIANGLE_STRIP", "TRIANGLE_FAN"];
 const MODE_TRIANGLES = 4;
@@ -68,10 +74,31 @@ export function gltfToStage(asset, options = {}) {
   // Scene / node hierarchy
   const scene = ctx.json.scenes?.[ctx.json.scene ?? 0];
   const rootNodes = scene ? scene.nodes || [] : (ctx.json.nodes || []).map((_, i) => i);
-  ctx.prototypes = planPrototypes(ctx, rootNodes, options.instancing ?? true);
+  const sceneNodes = collectSceneNodes(ctx, rootNodes);
+  ctx.skinNames = new Set();
+  ctx.skins = planSkins(ctx, sceneNodes);
+  ctx.skinnedNodes = new Set([...ctx.skins.values()].flatMap((p) => p.users));
+  ctx.prototypes = planPrototypes(ctx, sceneNodes, options.instancing ?? true);
   const scenePrim = root.child(new Prim("Xform", "Scene"));
   const usedNames = new Set();
-  for (const nodeIndex of rootNodes) buildNode(ctx, scenePrim, nodeIndex, usedNames);
+  for (const nodeIndex of rootNodes) buildNode(ctx, scenePrim, nodeIndex, usedNames, "/Root/Scene");
+
+  // Skinned meshes: one SkelRoot per skin, holding the Skeleton, its animation
+  // and the meshes (whose node transforms glTF ignores when skinning).
+  if (ctx.skins.size) {
+    const skins = root.child(new Prim("Scope", "Skins"));
+    for (const plan of ctx.skins.values()) {
+      const skelRoot = skins.child(new Prim("SkelRoot", plan.name));
+      const skelRootPath = `/Root/Skins/${plan.name}`;
+      const shapes = [];
+      const names = new Set(["Skeleton", "Animation"]);
+      for (const nodeIndex of plan.users) {
+        buildMeshPrims(ctx, skelRoot, ctx.json.nodes[nodeIndex].mesh, names, { plan, skelRootPath, shapes, node: nodeIndex });
+      }
+      buildSkeleton(ctx, plan, skelRoot, skelRootPath, shapes, (nd) => restWeights(ctx, nd));
+      skelPrimsFirst(skelRoot);
+    }
+  }
 
   // Prototypes for meshes shared by several nodes. `class` keeps them out of
   // the rendered scene; nodes reference them as instanceable prims.
@@ -113,18 +140,15 @@ function reportUnsupported(ctx) {
     warn(`Extension ${ext}${required ? " (required)" : ""} is not supported; its data is ignored`);
   }
   if ((json.scenes?.length ?? 0) > 1) warn(`glTF has ${json.scenes.length} scenes; only scene ${json.scene ?? 0} is converted`);
-  if (json.skins?.length) warn(`${json.skins.length} skin(s) are not supported yet; meshes are written in bind pose`);
   if (json.cameras?.length) warn(`${json.cameras.length} camera(s) are not supported yet and were skipped`);
-  if ((json.meshes || []).some((m) => (m.primitives || []).some((p) => p.targets?.length))) {
-    warn("Morph targets are not supported yet; base shapes are written");
-  }
 }
 
 // ---------- Nodes ----------
 
-function buildNode(ctx, parent, nodeIndex, siblingNames) {
+function buildNode(ctx, parent, nodeIndex, siblingNames, parentPath) {
   const node = ctx.json.nodes[nodeIndex];
   const name = uniqueName(sanitize(node.name, `Node_${nodeIndex}`), siblingNames);
+  const path = `${parentPath}/${name}`;
   const xform = parent.child(new Prim("Xform", name));
   const channels = ctx.animation?.nodes.get(nodeIndex);
   if (channels) {
@@ -139,9 +163,19 @@ function buildNode(ctx, parent, nodeIndex, siblingNames) {
 
   // Mesh prims and child nodes share one namespace under this Xform.
   const names = new Set();
-  if (node.mesh !== undefined) {
+  if (node.mesh !== undefined && !ctx.skinnedNodes.has(nodeIndex)) {
     const protoName = ctx.prototypes.get(node.mesh);
-    if (protoName) {
+    if (meshHasTargets(ctx.json.meshes[node.mesh])) {
+      // Blend shapes need a SkelRoot + Skeleton (without joints) + SkelAnimation for the weights.
+      const mesh = ctx.json.meshes[node.mesh];
+      const rootName = uniqueName(sanitize(mesh.name, `Mesh_${node.mesh}`), names);
+      const skelRootPath = `${path}/${rootName}`;
+      const skelRoot = xform.child(new Prim("SkelRoot", rootName));
+      const shapes = [];
+      buildMeshPrims(ctx, skelRoot, node.mesh, new Set(["Skeleton", "Animation"]), { plan: null, skelRootPath, shapes, node: nodeIndex });
+      buildSkeleton(ctx, NO_JOINTS, skelRoot, skelRootPath, shapes, (nd) => restWeights(ctx, nd));
+      skelPrimsFirst(skelRoot);
+    } else if (protoName) {
       const mesh = ctx.json.meshes[node.mesh];
       const instName = uniqueName(sanitize(mesh.name, `Mesh_${node.mesh}`), names);
       xform.child(new Prim("Xform", instName, {
@@ -152,36 +186,57 @@ function buildNode(ctx, parent, nodeIndex, siblingNames) {
     }
   }
 
-  for (const child of node.children || []) buildNode(ctx, xform, child, names);
+  for (const child of node.children || []) buildNode(ctx, xform, child, names, path);
 }
 
-/** One Mesh prim per glTF primitive. */
-function buildMeshPrims(ctx, parent, meshIndex, names) {
+/**
+ * One Mesh prim per glTF primitive.
+ * `skel` binds the meshes to a Skeleton in a SkelRoot:
+ *   { plan: SkinPlan | null, skelRootPath, shapes: collected blend shapes, node: glTF node (for weights) }
+ */
+function buildMeshPrims(ctx, parent, meshIndex, names, skel = null) {
   const mesh = ctx.json.meshes[meshIndex];
   const base = sanitize(mesh.name, `Mesh_${meshIndex}`);
   (mesh.primitives || []).forEach((prim, pi) => {
     const primName = uniqueName(mesh.primitives.length > 1 ? `${base}_${pi}` : base, names);
-    buildMeshPrim(ctx, parent, prim, primName);
+    buildMeshPrim(ctx, parent, prim, primName, skel, mesh);
   });
+}
+
+/** Skeleton and SkelAnimation first in a SkelRoot (readability only). */
+function skelPrimsFirst(skelRoot) {
+  const rank = (p) => ({ Skeleton: 0, SkelAnimation: 1 })[p.type] ?? 2;
+  skelRoot.children.sort((a, b) => rank(a) - rank(b));
+}
+
+/** Every node reachable from the scene roots, each once (guards against cycles). */
+function collectSceneNodes(ctx, rootNodes) {
+  const out = [];
+  const visited = new Set();
+  const visit = (i) => {
+    if (visited.has(i) || !ctx.json.nodes?.[i]) return;
+    visited.add(i);
+    out.push(i);
+    for (const c of ctx.json.nodes[i].children || []) visit(c);
+  };
+  rootNodes.forEach(visit);
+  return out;
 }
 
 /**
  * Meshes referenced by more than one node in the scene get a prototype under
  * /Root/Meshes. Returns Map<meshIndex, prototypeName> in mesh index order.
  */
-function planPrototypes(ctx, rootNodes, enabled) {
+function planPrototypes(ctx, sceneNodes, enabled) {
   const prototypes = new Map();
   if (!enabled) return prototypes;
   const uses = new Map();
-  const visited = new Set();
-  const visit = (i) => {
-    if (visited.has(i) || !ctx.json.nodes?.[i]) return; // guard against malformed cyclic graphs
-    visited.add(i);
+  for (const i of sceneNodes) {
     const node = ctx.json.nodes[i];
-    if (node.mesh !== undefined) uses.set(node.mesh, (uses.get(node.mesh) ?? 0) + 1);
-    for (const c of node.children || []) visit(c);
-  };
-  rootNodes.forEach(visit);
+    // Skinned and morphed meshes are bound per node, so they are not instanced.
+    if (node.mesh === undefined || ctx.skinnedNodes.has(i) || meshHasTargets(ctx.json.meshes[node.mesh])) continue;
+    uses.set(node.mesh, (uses.get(node.mesh) ?? 0) + 1);
+  }
   const used = new Set();
   [...uses.keys()].sort((a, b) => a - b).forEach((meshIndex) => {
     if (uses.get(meshIndex) < 2) return;
@@ -224,23 +279,12 @@ function identityIfTrivial(m) {
   return m.every((v, i) => v === I[i]) ? null : m;
 }
 
-// Column-major 4x4 (glTF convention), which is also USD's row-vector layout when
-// written as four rows of four: translation ends up in the last row.
-function composeTRS([tx, ty, tz], [x, y, z, w], [sx, sy, sz]) {
-  const xx = x * x, yy = y * y, zz = z * z;
-  const xy = x * y, xz = x * z, yz = y * z;
-  const wx = w * x, wy = w * y, wz = w * z;
-  return [
-    (1 - 2 * (yy + zz)) * sx, (2 * (xy + wz)) * sx, (2 * (xz - wy)) * sx, 0,
-    (2 * (xy - wz)) * sy, (1 - 2 * (xx + zz)) * sy, (2 * (yz + wx)) * sy, 0,
-    (2 * (xz + wy)) * sz, (2 * (yz - wx)) * sz, (1 - 2 * (xx + yy)) * sz, 0,
-    tx, ty, tz, 1,
-  ];
-}
+// composeTRS (src/math.js) returns column-major 4x4 (glTF convention), which is also
+// USD's row-vector layout when written as four rows of four: translation ends up last.
 
 // ---------- Meshes ----------
 
-function buildMeshPrim(ctx, parent, prim, name) {
+function buildMeshPrim(ctx, parent, prim, name, skel = null, gltfMesh = null) {
   const mode = prim.mode ?? MODE_TRIANGLES;
   if (mode !== MODE_TRIANGLES && mode !== MODE_TRIANGLE_STRIP && mode !== MODE_TRIANGLE_FAN) {
     ctx.warn(`Primitive mode ${MODE_NAMES[mode] ?? mode} is not supported; skipped (mesh "${name}")`);
@@ -257,8 +301,12 @@ function buildMeshPrim(ctx, parent, prim, name) {
   const triCount = indices.length / 3;
 
   const hasMaterial = prim.material !== undefined && ctx.json.materials?.[prim.material];
+  const skinning = skel?.plan ? skinningPrimvars(ctx, skel.plan, prim, pos.count, name) : null;
+  const hasShapes = !!(skel && prim.targets?.length);
+  const skelBound = !!(skinning || hasShapes);
+  const apiSchemas = [...(skelBound ? ["SkelBindingAPI"] : []), ...(hasMaterial ? ["MaterialBindingAPI"] : [])];
   const mesh = parent.child(new Prim("Mesh", name, {
-    metadata: hasMaterial ? { "prepend apiSchemas": ["MaterialBindingAPI"] } : {},
+    metadata: apiSchemas.length ? { "prepend apiSchemas": apiSchemas } : {},
   }));
   mesh.attr("token", "subdivisionScheme", "none", { uniform: true });
   mesh.attr("int[]", "faceVertexCounts", new Array(triCount).fill(3));
@@ -297,6 +345,18 @@ function buildMeshPrim(ctx, parent, prim, name) {
 
   // Extent (bounding box) is required by usdchecker for USDZ.
   mesh.attr("float3[]", "extent", extentOf(pos.data));
+
+  if (skinning) {
+    const meta = { elementSize: skinning.elementSize, interpolation: "vertex" };
+    mesh.attr("int[]", "primvars:skel:jointIndices", skinning.indices, { metadata: meta });
+    mesh.attr("float[]", "primvars:skel:jointWeights", skinning.weights, { metadata: meta });
+    mesh.attr("matrix4d", "primvars:skel:geomBindTransform", [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+  }
+  if (hasShapes) {
+    const shapes = addBlendShapes(ctx, mesh, `${skel.skelRootPath}/${name}`, gltfMesh, prim, pos.count);
+    for (const s of shapes) skel.shapes.push({ ...s, node: skel.node });
+  }
+  if (skelBound) mesh.rel("skel:skeleton", `${skel.skelRootPath}/Skeleton`);
 
   if (hasMaterial) {
     mesh.rel("material:binding", `/Root/Materials/${uniqueMaterialName(ctx, prim.material)}`);
@@ -590,20 +650,4 @@ function imageFile(ctx, imgIndex) {
 function generatorNote(json) {
   const g = json.asset?.generator;
   return g ? ` (${g.replace(/["\\]/g, "")})` : "";
-}
-
-/** USD prim names must match [A-Za-z_][A-Za-z0-9_]*. */
-export function sanitize(name, fallback) {
-  if (!name) return fallback;
-  let s = String(name).replace(/[^A-Za-z0-9_]/g, "_");
-  if (/^[0-9]/.test(s)) s = "_" + s;
-  return s || fallback;
-}
-
-function uniqueName(name, used) {
-  let candidate = name;
-  let i = 1;
-  while (used.has(candidate)) candidate = `${name}_${i++}`;
-  used.add(candidate);
-  return candidate;
 }

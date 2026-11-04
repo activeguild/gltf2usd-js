@@ -62,7 +62,7 @@ GLB を選ぶかドロップすると（またはサンプルボタンで）、�
 | `src/index.js`| 公開 API |
 | `demo/`       | ブラウザ用テストアプリ（`npm run demo`） |
 
-## 現在対応しているもの（段階 1〜3）
+## 現在対応しているもの（段階 1〜4）
 
 - GLB ヘッダ / JSON / BIN チャンク、data URI バッファ
 - `.gltf` と外部 `.bin` / 画像（`options.resources`）
@@ -78,6 +78,8 @@ GLB を選ぶかドロップすると（またはサンプルボタンで）、�
 - KHR_materials_emissive_strength / ior / clearcoat（transmission などは未対応で警告）
 - アニメーション（1 本）: TRS を `xformOp:translate` / `orient` / `scale` の timeSamples に。LINEAR / STEP / CUBICSPLINE
   （STEP は保持サンプル、CUBICSPLINE は 24fps でベイク）。`{ animation: index | name }` で選択
+- スキン → UsdSkel（SkelRoot / Skeleton / SkelAnimation、jointIndices / jointWeights）
+- モーフターゲット → BlendShape（ウェイトの固定値とアニメーション。スキンなしでも可）
 - 複数ノードで共有されるメッシュの instancing（`/Root/Meshes` のプロトタイプを `instanceable` で参照。`{ instancing: false }` で複製）
 - `options.onWarning` で、変換で捨てた情報を通知（CLI は標準エラーに出力）
 - OpenUSD 26.x の全バリデータで error 0 を確認済み
@@ -97,5 +99,5 @@ GLB を選ぶかドロップすると（またはサンプルボタンで）、�
 1. ~~GLB パーサ + USDA + USDZ~~ ✅
 2. ~~共有メッシュの instancing~~ ✅、~~TEXCOORD_1~~ ✅、KHR_materials_* 拡張（~~emissive_strength / ior / clearcoat~~ ✅）、~~KHR_texture_transform~~ ✅
 3. ~~アニメーション → `timeSamples`~~ ✅（1 本のみ。複数クリップの扱いは検討中）
-4. スキン → UsdSkel、モーフターゲット → BlendShape
+4. ~~スキン → UsdSkel、モーフターゲット → BlendShape~~ ✅
 5. USDC (Crate) バイナリ書き出し（`pxr/usd/usd/crateFile.cpp` を参照）

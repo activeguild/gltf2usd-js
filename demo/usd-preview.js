@@ -1,7 +1,8 @@
 // Builds a three.js scene from a parsed USDA layer (see usda-parser.js) and the
 // files of its USDZ package. Covers what gltf2usd.js writes: Xform hierarchy,
-// xformOps, Mesh (normals / st / displayColor with any interpolation) and
-// UsdPreviewSurface with UsdUVTexture inputs. Anything else is reported in
+// xformOps, Mesh (normals / st / displayColor with any interpolation),
+// UsdPreviewSurface with UsdUVTexture inputs, and UsdSkel (Skeleton +
+// SkelAnimation joints, BlendShapes and their weights). Anything else is reported in
 // `warnings` so it is obvious when the preview, not the converter, is the limit.
 
 import * as THREE from "three";
@@ -18,6 +19,9 @@ export function buildUsdScene(layer, entries) {
   const geometryCache = new Map(); // Mesh prim path → BufferGeometry (shared by instances)
   const objectUrls = [];
   const animated = []; // { prim, obj } with time-sampled xformOps
+  const updaters = []; // (timeCode | undefined) => void, for skeletons and blend shape weights
+  const skeletons = new Map(); // Skeleton prim path → { skeleton: THREE.Skeleton, group, update }
+  const objects = new Map(); // prim path → Object3D
 
   const root = new THREE.Group();
   root.name = "USD";
@@ -29,19 +33,25 @@ export function buildUsdScene(layer, entries) {
     const obj = buildPrim(prim);
     if (obj) root.add(obj);
   }
+  // Bones live under the Skeleton prim's parent (its SkelRoot), so skeleton space follows the scene.
+  for (const [path, sk] of skeletons) {
+    const parentObj = objects.get(path.slice(0, path.lastIndexOf("/")));
+    (parentObj ?? root).add(sk.group);
+  }
   // Timeline: objects whose xformOps have timeSamples are re-evaluated by setTime().
   const md = layer.metadata;
-  const timeline = animated.length
+  const timeline = animated.length || updaters.some((u) => u.timed)
     ? {
-        start: md.startTimeCode ?? Math.min(...animated.flatMap((a) => sampleTimes(a.prim))),
-        end: md.endTimeCode ?? Math.max(...animated.flatMap((a) => sampleTimes(a.prim))),
+        start: md.startTimeCode ?? Math.min(0, ...animated.flatMap((a) => sampleTimes(a.prim))),
+        end: md.endTimeCode ?? Math.max(0, ...animated.flatMap((a) => sampleTimes(a.prim))),
         timeCodesPerSecond: md.timeCodesPerSecond ?? 24,
       }
     : null;
   const setTime = (timeCode) => {
     for (const { prim, obj } of animated) applyXformOps(prim, obj, timeCode);
+    for (const u of updaters) u(timeCode);
   };
-  if (timeline) setTime(timeline.start);
+  setTime(timeline ? timeline.start : undefined);
 
   return { object: root, warnings, timeline, setTime, dispose: () => objectUrls.forEach((u) => URL.revokeObjectURL(u)) };
 
@@ -51,6 +61,8 @@ export function buildUsdScene(layer, entries) {
     if (prim.specifier === "class") return null;
     prim = composeReferences(prim, 0);
     if (prim.type === "Material" || prim.type === "Shader") return null;
+    // UsdSkel prims are read through the meshes bound to them.
+    if (prim.type === "Skeleton" || prim.type === "SkelAnimation" || prim.type === "BlendShape") return null;
 
     let obj;
     if (prim.type === "Mesh") {
@@ -61,6 +73,7 @@ export function buildUsdScene(layer, entries) {
     }
     obj.name = prim.name;
     obj.userData.usdPath = prim.path;
+    objects.set(prim.path, obj);
     applyXformOps(prim, obj, undefined);
     if (hasTimeSamples(prim)) animated.push({ prim, obj });
     const vis = prim.props.get("visibility")?.value;
@@ -124,7 +137,8 @@ export function buildUsdScene(layer, entries) {
     const cached = geometryCache.get(prim.path);
     if (cached) return new THREE.Mesh(cached.geometry, cached.material);
     const obj = buildMeshUncached(prim);
-    if (obj.isMesh) geometryCache.set(prim.path, obj);
+    // Skinned / blend-shaped meshes are bound per prim and never shared.
+    if (obj.isMesh && !obj.isSkinnedMesh && !obj.morphTargetInfluences) geometryCache.set(prim.path, obj);
     return obj;
   }
 
@@ -177,8 +191,140 @@ export function buildUsdScene(layer, entries) {
 
     const material = buildBoundMaterial(prim, !!dc?.value);
     if (get("doubleSided")) material.side = THREE.DoubleSide;
+    if (prim.props.has("skel:skeleton")) return bindSkel(prim, geom, material, corners, vertexOf, points.length);
     const mesh = new THREE.Mesh(geom, material);
     return mesh;
+  }
+
+  // ---------- UsdSkel ----------
+
+  /**
+   * Blend shapes → morph attributes; joint influences → SkinnedMesh. three.js skins a
+   * vertex (in "attached" mode) to  Σ w · boneWorld · boneInverse · bindMatrix · v,
+   * which is UsdSkel's  skelWorld · Σ w · jointSkel · inverse(bindTransform) · geomBindTransform · v
+   * when the bones hang under the Skeleton's parent, boneInverse = inverse(bindTransform)
+   * and bindMatrix = geomBindTransform.
+   */
+  function bindSkel(prim, geom, material, corners, vertexOf, pointCount) {
+    const skelPath = prim.props.get("skel:skeleton").value[0];
+    const skelPrim = prims.get(skelPath);
+    if (!skelPrim) { warn(`${prim.path}: skel:skeleton ${skelPath} がない`); return new THREE.Mesh(geom, material); }
+    const animPrim = prims.get(skelPrim.props.get("skel:animationSource")?.value?.[0]);
+
+    // Blend shapes (relative morph targets, sparse pointIndices expanded to all points).
+    const tokens = prim.props.get("skel:blendShapes")?.value ?? [];
+    const targets = prim.props.get("skel:blendShapeTargets")?.value ?? [];
+    if (targets.length) {
+      const pos = [], nrm = [];
+      for (const t of targets) {
+        const bs = prims.get(t);
+        const full = (attr) => {
+          const v = bs?.props.get(attr)?.value;
+          if (!v) return null;
+          const pi = bs.props.get("pointIndices")?.value;
+          const out = Array.from({ length: pointCount }, () => [0, 0, 0]);
+          v.forEach((o, k) => { out[pi ? pi[k] : k] = o; });
+          return expand(out, 3, corners, "vertex", vertexOf);
+        };
+        pos.push(full("offsets") ?? expand([], 3, corners, "vertex", vertexOf));
+        nrm.push(full("normalOffsets"));
+      }
+      geom.morphAttributes.position = pos;
+      if (nrm.every(Boolean)) geom.morphAttributes.normal = nrm;
+      geom.morphTargetsRelative = true;
+    }
+
+    let obj;
+    const ji = prim.props.get("primvars:skel:jointIndices");
+    const jw = prim.props.get("primvars:skel:jointWeights");
+    const sk = ji && jw ? getSkeleton(skelPrim, animPrim) : null;
+    if (sk) {
+      const es = ji.metadata.elementSize ?? 1;
+      if (es > 4) warn(`${prim.path}: ジョイント影響 ${es} 個のうち、重い順に 4 つだけ表示（three.js の上限）`);
+      const perPoint = [];
+      for (let p = 0; p < pointCount; p++) {
+        const inf = [];
+        for (let c = 0; c < es; c++) inf.push([ji.value[p * es + c], jw.value[p * es + c]]);
+        inf.sort((a, b) => b[1] - a[1]);
+        const top = inf.slice(0, 4);
+        while (top.length < 4) top.push([0, 0]);
+        const sum = top.reduce((a, [, w]) => a + w, 0) || 1;
+        perPoint.push(top.map(([j, w]) => [j, w / sum]));
+      }
+      const idx = new Uint16Array(corners.length * 4);
+      const wts = new Float32Array(corners.length * 4);
+      corners.forEach((corner, i) => {
+        perPoint[vertexOf(corner)].forEach(([j, w], c) => { idx[i * 4 + c] = j; wts[i * 4 + c] = w; });
+      });
+      geom.setAttribute("skinIndex", new THREE.BufferAttribute(idx, 4));
+      geom.setAttribute("skinWeight", new THREE.BufferAttribute(wts, 4));
+      obj = new THREE.SkinnedMesh(geom, material);
+      const gb = prim.props.get("primvars:skel:geomBindTransform")?.value;
+      obj.bind(sk.skeleton, gb ? new THREE.Matrix4().fromArray(gb.flat()) : new THREE.Matrix4());
+      obj.frustumCulled = false; // bounds of the rest pose don't follow the animation
+    } else {
+      obj = new THREE.Mesh(geom, material);
+    }
+
+    // Blend shape weights from the skeleton's animation, matched by token.
+    if (targets.length) {
+      const order = animPrim?.props.get("blendShapes")?.value ?? [];
+      const weights = animPrim?.props.get("blendShapeWeights");
+      const map = tokens.map((t) => order.indexOf(t));
+      const update = (time) => {
+        const w = weights ? valueAt(weights, time) : null;
+        map.forEach((k, i) => { obj.morphTargetInfluences[i] = k >= 0 && w ? w[k] ?? 0 : 0; });
+      };
+      update.timed = !!weights?.timeSamples;
+      updaters.push(update);
+    }
+    return obj;
+  }
+
+  /** One THREE.Skeleton per Skeleton prim; bones posed from restTransforms or the SkelAnimation. */
+  function getSkeleton(skelPrim, animPrim) {
+    if (skeletons.has(skelPrim.path)) return skeletons.get(skelPrim.path);
+    const tokens = skelPrim.props.get("joints")?.value ?? [];
+    const mat = (rows) => new THREE.Matrix4().fromArray(rows.flat());
+    const bind = skelPrim.props.get("bindTransforms")?.value ?? [];
+    const rest = skelPrim.props.get("restTransforms")?.value ?? [];
+    const group = new THREE.Group();
+    group.name = `${skelPrim.name} (bones)`;
+    applyXformOps(skelPrim, group, undefined);
+    const byToken = new Map();
+    const bones = tokens.map((token, k) => {
+      const bone = new THREE.Bone();
+      bone.name = token.split("/").pop();
+      if (rest[k]) mat(rest[k]).decompose(bone.position, bone.quaternion, bone.scale);
+      const parentToken = token.includes("/") ? token.slice(0, token.lastIndexOf("/")) : null;
+      (byToken.get(parentToken) ?? group).add(bone);
+      byToken.set(token, bone);
+      return bone;
+    });
+    const inverses = tokens.map((_, k) => (bind[k] ? mat(bind[k]).invert() : new THREE.Matrix4()));
+    const skeleton = new THREE.Skeleton(bones, inverses);
+
+    // Joint animation: joints missing from the animation keep their rest transform.
+    const animJoints = animPrim?.props.get("joints")?.value ?? [];
+    const T = animPrim?.props.get("translations"), R = animPrim?.props.get("rotations"), S = animPrim?.props.get("scales");
+    if (animJoints.length && (T || R || S)) {
+      const slot = tokens.map((t) => animJoints.indexOf(t));
+      const update = (time) => {
+        const t = T && valueAt(T, time), r = R && valueAt(R, time), s = S && valueAt(S, time);
+        slot.forEach((k, j) => {
+          if (k < 0) return;
+          const bone = bones[j];
+          if (t) bone.position.fromArray(t[k]);
+          if (r) bone.quaternion.set(r[k][1], r[k][2], r[k][3], r[k][0]); // USD quat is (w, x, y, z)
+          if (s) bone.scale.fromArray(s[k]);
+        });
+      };
+      update.timed = [T, R, S].some((p) => p?.timeSamples);
+      updaters.push(update);
+    }
+    const entry = { skeleton, group };
+    skeletons.set(skelPrim.path, entry);
+    return entry;
   }
 
   function expandPrimvar(prim, prop, size, corners, vertexOf, defaultInterp) {
@@ -412,12 +558,22 @@ function valueAt(prop, time) {
   if (!ts?.length) return prop.value;
   if (time === undefined || time <= ts[0][0]) return ts[0][1];
   if (time >= ts[ts.length - 1][0]) return ts[ts.length - 1][1];
-  let i = 0;
-  while (ts[i + 1][0] < time) i++;
-  const [t0, a] = ts[i];
-  const [t1, b] = ts[i + 1];
+  let lo = 0, hi = ts.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (ts[mid][0] <= time) lo = mid; else hi = mid;
+  }
+  const [t0, a] = ts[lo];
+  const [t1, b] = ts[hi];
   const u = (time - t0) / (t1 - t0);
-  if (/^quat/.test(prop.type)) {
+  const quat = /^quat/.test(prop.type);
+  // Arrays (quatf[], float3[], float[]) interpolate element-wise, like USD.
+  if (prop.isArray) return a.map((v, k) => lerpValue(v, b[k], u, quat));
+  return lerpValue(a, b, u, quat);
+}
+
+function lerpValue(a, b, u, quat) {
+  if (quat) {
     const qa = new THREE.Quaternion(a[1], a[2], a[3], a[0]);
     const qb = new THREE.Quaternion(b[1], b[2], b[3], b[0]);
     qa.slerp(qb, u); // three.js slerp takes the shortest path, like GfSlerp

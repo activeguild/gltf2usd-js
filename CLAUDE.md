@@ -8,23 +8,28 @@ Node 固有 API（`fs`, `Buffer`）は `cli.js` と `test/` の中だけで使�
 
 npm パッケージ名: `gltf2usd-js`。
 
-## 現在の状態（段階 1〜3 完了。要相談事項は「要相談」を参照）
+## 現在の状態（段階 1〜4 完了。要相談事項は「要相談」を参照）
 
-`src/` 4 ファイル、合計 ~1000 行。テスト GLB（`cube.glb`、段階 2 の機能を詰めた `features.glb`、外部ファイル付き `gltf/cube.gltf`）と
-Khronos サンプル（BoxTextured / CesiumMilkTruck / DamagedHelmet）を OpenUSD 26.11 の全 30 バリデータに通して error 0 を確認済み。
+`src/` 10 ファイル。テスト GLB（`cube.glb`、`features.glb`、`animated.glb`、`skinned.glb`、外部ファイル付き `gltf/cube.gltf`）と
+Khronos サンプル（BoxTextured / CesiumMilkTruck / DamagedHelmet / BoxAnimated / InterpolationTest / RiggedSimple / RiggedFigure /
+CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 の全 30 バリデータに通して error 0 を確認済み。
 
 | ファイル | 役割 | 備考 |
 |---|---|---|
 | `src/glb.js`  | `parseGLB()`, `GltfAsset` | accessor デコード（byteStride / normalized / sparse 対応）、`imageBytes()` |
 | `src/convert.js` | `gltfToStage(asset, opts)` → `{ layer, files }`（glTF → USD IR） | ノード階層、Mesh、UsdPreviewSurface、警告 |
-| `src/animation.js` | `evaluateAnimation(ctx, which)` | glTF アニメーション 1 本 → ノードごとの TRS timeSamples |
+| `src/animation.js` | `evaluateAnimation(ctx, which)`, `sampleAt()` | glTF アニメーション 1 本 → ノードごとの TRS / weights サンプル |
+| `src/skin.js` | `planSkins()`, `buildSkeleton()`, `skinningPrimvars()` | glTF skin → SkelRoot / Skeleton / SkelAnimation、jointIndices / Weights |
+| `src/morph.js` | `addBlendShapes()`, `restWeights()` | morph target → BlendShape prim、skel:blendShapes |
+| `src/math.js` | 4x4 行列（glTF 規約）、`decompose()`、`slerp()` | `composeTRS` もここ |
+| `src/names.js` | `sanitize()`, `uniqueName()` | prim 名・ジョイント名 |
 | `src/ir.js` | `Layer` / `Prim`（`attr()` / `rel()` / `child()`） | USD 側のプリム・属性ツリー。値の表現規約は冒頭コメント |
 | `src/usda.js` | `writeUsda(layer)` → USDA 文字列 | 型名から書式を決める。timeSamples 対応 |
 | `src/usdz.js` | `packUsdz(entries)` → `Uint8Array` | stored-only zip、64 バイトアライン、CRC32 自前 |
 | `src/index.js`| `glbToUsda()`, `glbToUsdz()`, `gltfToUsda()` | 公開 API。名前は glb だが `.gltf` も受け付ける |
 | `cli.js`      | `node cli.js in.glb\|in.gltf out.usdz\|out.usda` | `.gltf` の外部ファイルは同じフォルダ以下からのみ読む |
-| `test/cube-glb.js` | テスト用 GLB をメモリ上で生成（Node / ブラウザ共用） | `buildCubeGlb()`（段階 1）、`buildFeatureGlb()`（段階 2）、`buildAnimatedGlb()`（段階 3）、`buildCubeGltf()` |
-| `test/make-glb.js` | `test/cube.glb`、`test/features.glb`、`test/animated.glb`、`test/gltf/`（外部ファイル付き .gltf）を書き出す | |
+| `test/cube-glb.js` | テスト用 GLB をメモリ上で生成（Node / ブラウザ共用） | `buildCubeGlb()`（段階 1）、`buildFeatureGlb()`（段階 2）、`buildAnimatedGlb()`（段階 3）、`buildSkinnedGlb()`（段階 4）、`buildCubeGltf()` |
+| `test/make-glb.js` | 上記を `test/*.glb` と `test/gltf/`（外部ファイル付き .gltf）に書き出す | |
 | `test/png.js` | テスト画像用の小さな PNG エンコーダ | |
 | `test/run.js` | JS 側の単体テスト（prim 名、zip アライン検証） | `npm test` |
 | `test/validate.py` | OpenUSD で開いてバリデータ実行 | `pip install usd-core` が必要 |
@@ -36,14 +41,17 @@ Khronos サンプル（BoxTextured / CesiumMilkTruck / DamagedHelmet）を OpenU
 - `usd-preview.js`: パース結果から three.js シーンを組み立てる（xformOp、Mesh の各 interpolation、UsdPreviewSurface + UsdUVTexture、
   internal reference の簡易合成。インスタンス間でジオメトリを共有）。
   表現できないものは「プレビューで表現できなかったもの」に出る
-- `checks.js`: 構造チェック（zip アライン / 圧縮 / CRC、Mesh トポロジ、primvar 要素数、binding、シェーダ接続、テクスチャ参照）
+- `checks.js`: 構造チェック（zip アライン / 圧縮 / CRC、Mesh トポロジ、primvar 要素数（elementSize 込み）、binding、シェーダ接続、
+  テクスチャ参照、UsdSkel: SkelBindingAPI / SkelRoot 配下 / ジョイント順 / jointIndices の範囲 / BlendShape の要素数）
 - `usdz-reader.js`: zip の central directory を読む
 - `server.js`: 依存ゼロの静的サーバ
 - three.js（0.170.0）は import map で jsDelivr から読む。デモにだけ許される依存で、`src/` には入れない
 - **GLTFLoader の KHR_texture_transform は仕様とずれる**（S·R の順で合成するため、非一様 scale + rotation で崩れる）。
   `app.js` の `fixTextureTransforms()` で仕様どおりの行列に直してから左側に表示している
 - **新しい USD 機能を出力したら、`usd-preview.js` / `checks.js` もそれを読めるように更新する**
-  （`UsdTransform2d`、`primvars:st1..3`、internal reference、xformOp の timeSamples は対応済み）
+  （`UsdTransform2d`、`primvars:st1..3`、internal reference、xformOp の timeSamples、UsdSkel は対応済み）
+- UsdSkel は `SkinnedMesh`（ボーンは Skeleton prim の親の下、boneInverses = inverse(bindTransforms)、bindMatrix = geomBindTransform、
+  影響が 5 つ以上なら上位 4 つ）と morph 属性（`pointIndices` は全点に展開）で表示
 - アニメーションがあると再生 / 一時停止とシークバーが出る。左は AnimationMixer（`LoopOnce` + 自前でループ）、
   右は timeSamples を USD と同じ規則（線形、quat は slerp、範囲外は端の値）で評価
 
@@ -64,6 +72,9 @@ Khronos サンプル（BoxTextured / CesiumMilkTruck / DamagedHelmet）を OpenU
 - アニメーション（1 本）: translation / rotation / scale → `xformOp:translate` / `orient` / `scale` の timeSamples。
   LINEAR はそのまま、STEP は次キーの直前（-0.001 timecode）に同値を足して保持、CUBICSPLINE は 24fps + 全キーでベイク。
   `startTimeCode` / `endTimeCode` / `timeCodesPerSecond = framesPerSecond = 24`
+- スキン → `/Root/Skins/<Skin>`（SkelRoot）に Skeleton / SkelAnimation / メッシュ。JOINTS_n / WEIGHTS_n すべて（elementSize = 4n）
+- モーフターゲット → Mesh 子の `BlendShape`（offsets / normalOffsets、疎なら pointIndices）。スキンなしのメッシュは
+  ノードの下に専用 SkelRoot（ジョイント 0 個の Skeleton）。ウェイトは node.weights / mesh.weights と weights アニメーション
 - KHR_materials_emissive_strength（emissiveColor に乗算）、KHR_materials_ior（`inputs:ior`）、
   KHR_materials_clearcoat（`inputs:clearcoat` / `clearcoatRoughness`、テクスチャは R / G。clearcoatNormal は警告）
 - `options.onWarning`: 未対応拡張、POINTS / LINES、POSITION なし、アニメーション / スキン / カメラ / モーフ、複数シーン、
@@ -72,8 +83,9 @@ Khronos サンプル（BoxTextured / CesiumMilkTruck / DamagedHelmet）を OpenU
 ### 未対応（既知）
 - KHR_materials_transmission / volume / specular / sheen / unlit など（警告）、KHR_mesh_quantization（normalized は読めるので一部は動く）
 - POINTS / LINES プリミティブ（スキップして警告）
-- 2 本目以降のアニメーション（`options.animation` で 1 本選ぶ。警告あり）、morph weights のアニメーション
-- スキン、モーフターゲット、カメラ、ライト
+- 2 本目以降のアニメーション（`options.animation` で 1 本選ぶ。警告あり）
+- ジョイントの間にある非ジョイントノードのアニメーション（警告）、morph target の TANGENT（警告）
+- カメラ、ライト
 - USDC（Crate）出力
 
 ## 重要な設計判断（変えるときは理由を README にも書くこと）
@@ -105,6 +117,18 @@ Khronos サンプル（BoxTextured / CesiumMilkTruck / DamagedHelmet）を OpenU
    ベイクする（回転は正規化）。three.js の AnimationMixer と OpenUSD の評価を比較して、LINEAR / STEP は 1e-6 以内、
    CUBICSPLINE はフレーム間で最大 3e-3（24fps ベイクによる誤差）。
 
+12. **UsdSkel の配置。** glTF はスキンメッシュのノード変換を無視し `Σ w · jointWorld · IBM · v`（ワールド）で変形する。
+   そこで各スキンを単位変換の `/Root/Skins/<Skin>`（SkelRoot）に置き、スケルトン空間 = glTF のワールドにする。
+   `bindTransforms = inverse(IBM)`、`geomBindTransform = 単位`。ジョイントの親は「同じスキンの最も近い祖先ジョイント」、
+   `restTransforms` とアニメーションは `inverse(world(親ジョイント)) · world(直接の親) · local(t)`（ルートは祖先の Armature 等も含む）。
+   前置行列が単位なら TRS をそのまま、そうでなければ分解して書く。joints は親が先（UsdSkel の要件）。
+   ジョイントのノード自体も Scene に Xform として残る（ボーンに付けた小物はそのまま動く）。
+   スキン / モーフ付きメッシュは instancing しない（ノードごとにバインドが違うため）。
+13. **BlendShape はジョイント 0 個の Skeleton でも動く**（OpenUSD で確認済み）。トークンは `<Mesh prim>_<target>` にして、
+   1 つの SkelAnimation を複数メッシュで共有できるようにする。three.js（getVertexPosition）と OpenUSD（UsdSkel の
+   BlendShapeQuery + SkinningQuery）の変形後頂点を比較して、RiggedSimple / RiggedFigure / CesiumMan / Fox / AnimatedMorphCube /
+   MorphPrimitivesTest / skinned.glb で相対 1e-6 以内。
+
 ## OpenUSD バリデータに指摘されて直した点（再発注意）
 
 - `UsdPrimvarReader_float2` の `inputs:varname` は **`string`**（`token` だと MismatchedPropertyType）
@@ -119,6 +143,7 @@ node cli.js test/cube.glb /tmp/cube.usdz
 pip install usd-core --break-system-packages   # 初回のみ
 python3 test/validate.py /tmp/cube.usdz    # "0 validation error(s)" を確認
 node cli.js test/animated.glb /tmp/animated.usdz && python3 test/validate.py /tmp/animated.usdz
+node cli.js test/skinned.glb /tmp/skinned.usdz && python3 test/validate.py /tmp/skinned.usdz
 node cli.js test/features.glb /tmp/features.usdz && python3 test/validate.py /tmp/features.usdz
 node cli.js test/gltf/cube.gltf /tmp/cube-gltf.usdz && python3 test/validate.py /tmp/cube-gltf.usdz
 npm run demo                               # 見た目の確認: サンプルと fixtures の GLB を左右で比較
@@ -133,7 +158,10 @@ npm run demo                               # 見た目の確認: サンプルと
 - **KHR_materials_transmission**: UsdPreviewSurface に対応入力がない。現状は警告のみ。`opacity = 1 - transmission` で近似するか
 - **公開関数名**: `glbToUsda` / `glbToUsdz` は `.gltf` も受け付けるようになった。改名や別名を足すか
 - **複数アニメーション**: 現状は 1 本（`options.animation`）。`variantSet` で切替にするか、別ノードを動かすクリップは統合するか
-  （例: Khronos の InterpolationTest は 9 クリップがそれぞれ別のキューブを動かすので、統合すれば全部入る）
+  （例: Khronos の InterpolationTest は 9 クリップがそれぞれ別のキューブを動かすので、統合すれば全部入る。Fox は Survey / Walk / Run）
+- **CUBICSPLINE のベイク間隔**: 24fps で最大 3e-3 の誤差。もっと細かくするか
+- **マテリアルなしのプリミティブ**: glTF の既定マテリアル（白、metallic 1、roughness 1）を書いていない。USD 側では未バインド扱いで
+  灰色に見える（段階 1 からの挙動）。既定マテリアルを出力するか
 
 ## ロードマップと次のタスク
 
@@ -160,9 +188,9 @@ npm run demo                               # 見た目の確認: サンプルと
 - [ ] 残り（`variantSet` で切替 / 衝突しないクリップの統合）をどうするかは要相談
 
 ### 段階 4: スキン・モーフ
-- [ ] UsdSkel: `SkelRoot` / `Skeleton`（joints, bindTransforms, restTransforms）/ `SkelAnimation` / `SkelBindingAPI`
-      Mesh 側に `primvars:skel:jointIndices` / `jointWeights`（elementSize = 4）、`skel:geomBindTransform`
-- [ ] モーフ: `BlendShape` prim（offsets / normalOffsets）+ `skel:blendShapes` + `SkelAnimation.blendShapeWeights`
+- [x] UsdSkel: `SkelRoot` / `Skeleton`（joints, bindTransforms, restTransforms）/ `SkelAnimation` / `SkelBindingAPI`
+      Mesh 側に `primvars:skel:jointIndices` / `jointWeights`（elementSize = 4 × セット数）、`skel:geomBindTransform`
+- [x] モーフ: `BlendShape` prim（offsets / normalOffsets / pointIndices）+ `skel:blendShapes` + `SkelAnimation.blendShapeWeights`
 
 ### 段階 5: USDC (Crate) 出力
 - OpenUSD `pxr/usd/usd/crateFile.cpp` / `crateData.cpp` が唯一の一次資料

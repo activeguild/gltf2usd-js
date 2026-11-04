@@ -73,6 +73,16 @@ export function runChecks(entries, layer) {
   }
   if (instances && !refProblems) ok(`instance ${instances} 個: reference 先はすべて存在する`);
 
+  // ---- UsdSkel ----
+  let skeletons = 0;
+  let skelProblems = 0;
+  for (const prim of traverse(layer.prims)) {
+    if (prim.type !== "Skeleton") continue;
+    skeletons++;
+    for (const p of checkSkeleton(prim)) { skelProblems++; out.push({ level: p.level, msg: `${prim.path}: ${p.msg}` }); }
+  }
+  if (skeletons && !skelProblems) ok(`Skeleton ${skeletons} 個: ジョイント順（親が先）と bind / rest の数に問題なし`);
+
   // ---- Materials & shaders ----
   let shaderProblems = 0;
   for (const prim of traverse(layer.prims)) {
@@ -139,15 +149,19 @@ function checkMesh(prim, prims) {
 
   for (const [name, prop] of prim.props) {
     if (!(name.startsWith("primvars:") || name === "normals") || name.endsWith(":indices")) continue;
-    if (!Array.isArray(prop.value)) continue;
+    if (!prop.isArray || !Array.isArray(prop.value)) continue; // e.g. a constant matrix4d primvar
     const interp = prop.metadata.interpolation ?? (name === "normals" ? "vertex" : "constant");
+    const elementSize = prop.metadata.elementSize ?? 1;
     const idx = prim.props.get(`${name}:indices`)?.value;
     const n = idx ? idx.length : prop.value.length;
-    const expected = { constant: 1, uniform: counts.length, vertex: points.length, varying: points.length, faceVarying: indices.length }[interp];
+    const base = { constant: 1, uniform: counts.length, vertex: points.length, varying: points.length, faceVarying: indices.length }[interp];
+    const expected = base === undefined ? undefined : base * elementSize;
     if (expected !== undefined && n !== expected) {
-      err(`${name} の要素数 ${n} が interpolation "${interp}" の期待値 ${expected} と一致しない`);
+      err(`${name} の要素数 ${n} が interpolation "${interp}"${elementSize > 1 ? ` × elementSize ${elementSize}` : ""} の期待値 ${expected} と一致しない`);
     }
   }
+
+  problems.push(...checkSkelBinding(prim, prims, points.length));
 
   const binding = prim.props.get("material:binding");
   if (binding) {
@@ -163,6 +177,71 @@ function checkMesh(prim, prims) {
     }
     const api = prim.metadata["prepend apiSchemas"] ?? prim.metadata.apiSchemas ?? [];
     if (!api.includes("MaterialBindingAPI")) err("material:binding があるのに MaterialBindingAPI が適用されていない");
+  }
+  return problems;
+}
+
+/** UsdSkel: skeleton binding, joint influences and blend shapes of one Mesh. */
+function checkSkelBinding(prim, prims, pointCount) {
+  const problems = [];
+  const err = (msg) => problems.push({ level: "error", msg });
+  const skelPath = prim.props.get("skel:skeleton")?.value?.[0];
+  const jointIdx = prim.props.get("primvars:skel:jointIndices");
+  const shapes = prim.props.get("skel:blendShapes")?.value;
+  if (!skelPath && !jointIdx && !shapes) return problems;
+
+  const api = prim.metadata["prepend apiSchemas"] ?? prim.metadata.apiSchemas ?? [];
+  if (!api.includes("SkelBindingAPI")) err("skel:* を使うのに SkelBindingAPI が適用されていない");
+  let anc = prim.parent;
+  while (anc && anc.type !== "SkelRoot") anc = anc.parent;
+  if (!anc) err("SkelRoot の下にない（UsdSkel の変形が効かない）");
+  const skel = skelPath && prims.get(skelPath);
+  if (!skel || skel.type !== "Skeleton") {
+    err(`skel:skeleton の参照先が Skeleton ではない (${skelPath ?? "なし"})`);
+    return problems;
+  }
+  const jointCount = skel.props.get("joints")?.value?.length ?? 0;
+
+  if (jointIdx) {
+    const weights = prim.props.get("primvars:skel:jointWeights");
+    const es = jointIdx.metadata.elementSize ?? 1;
+    if (!weights) err("jointIndices があるのに jointWeights がない");
+    else if ((weights.metadata.elementSize ?? 1) !== es) err("jointIndices と jointWeights の elementSize が違う");
+    const bad = jointIdx.value.find((j) => j < 0 || j >= jointCount);
+    if (bad !== undefined) err(`jointIndices に範囲外のジョイント ${bad}（joints は ${jointCount} 個）`);
+  }
+
+  if (shapes) {
+    const targets = prim.props.get("skel:blendShapeTargets")?.value ?? [];
+    if (targets.length !== shapes.length) err(`skel:blendShapes ${shapes.length} 個と skel:blendShapeTargets ${targets.length} 個が一致しない`);
+    for (const t of targets) {
+      const shape = prims.get(t);
+      if (!shape || shape.type !== "BlendShape") { err(`blendShapeTarget ${t} が BlendShape ではない`); continue; }
+      const offsets = shape.props.get("offsets")?.value ?? [];
+      const pi = shape.props.get("pointIndices")?.value;
+      const expected = pi ? pi.length : pointCount;
+      if (offsets.length !== expected) err(`${t}: offsets ${offsets.length} 個（期待値 ${expected}）`);
+      if (pi?.some((i) => i < 0 || i >= pointCount)) err(`${t}: pointIndices が範囲外`);
+    }
+  }
+  return problems;
+}
+
+/** Skeleton: parents before children, one bind / rest transform per joint. */
+function checkSkeleton(prim) {
+  const problems = [];
+  const joints = prim.props.get("joints")?.value ?? [];
+  const seen = new Set();
+  for (const j of joints) {
+    const parent = j.includes("/") ? j.slice(0, j.lastIndexOf("/")) : null;
+    if (parent && !seen.has(parent)) problems.push({ level: "error", msg: `ジョイント ${j} が親 ${parent} より前にある（または親がない）` });
+    seen.add(j);
+  }
+  for (const attr of ["bindTransforms", "restTransforms"]) {
+    const v = prim.props.get(attr)?.value;
+    if (joints.length && (!v || v.length !== joints.length)) {
+      problems.push({ level: "error", msg: `${attr} が ${v?.length ?? 0} 個（joints は ${joints.length} 個）` });
+    }
   }
   return problems;
 }

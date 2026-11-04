@@ -83,6 +83,11 @@ function writeProp(lines, prop, depth) {
 function fmtValue(typeName, v) {
   if (typeName.endsWith("[]")) {
     const base = typeName.slice(0, -2);
+    if (base === "matrix4d") {
+      const out = [];
+      for (let i = 0; i < v.length; i += 16) out.push(fmtMatrix(v.slice(i, i + 16)));
+      return `[${out.join(", ")}]`;
+    }
     const n = TUPLE_SIZE[base];
     if (n) return `[${fmtVecs(v, n)}]`;
     return `[${Array.from(v, (x) => fmtScalar(base, x)).join(", ")}]`;

@@ -2,6 +2,7 @@ node_modules/
 test/cube.glb
 test/features.glb
 test/animated.glb
+test/skinned.glb
 *.usdz
 *.usda
 !test/fixtures/*

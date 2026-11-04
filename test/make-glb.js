@@ -2,11 +2,12 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildAnimatedGlb, buildCubeGlb, buildCubeGltf, buildFeatureGlb } from "./cube-glb.js";
+import { buildAnimatedGlb, buildCubeGlb, buildCubeGltf, buildFeatureGlb, buildSkinnedGlb } from "./cube-glb.js";
 
 writeFileSync(new URL("./cube.glb", import.meta.url), buildCubeGlb());
 writeFileSync(new URL("./features.glb", import.meta.url), buildFeatureGlb());
 writeFileSync(new URL("./animated.glb", import.meta.url), buildAnimatedGlb());
+writeFileSync(new URL("./skinned.glb", import.meta.url), buildSkinnedGlb());
 // test/gltf/: the cube as .gltf + external .bin / image, for the CLI
 const { gltf, resources } = buildCubeGltf();
 const dir = fileURLToPath(new URL("./gltf/", import.meta.url));
@@ -16,4 +17,4 @@ for (const [name, bytes] of Object.entries(resources)) {
   mkdirSync(dirname(`${dir}${name}`), { recursive: true });
   writeFileSync(`${dir}${name}`, bytes);
 }
-console.log("wrote test/cube.glb, test/features.glb, test/animated.glb, test/gltf/cube.gltf");
+console.log("wrote test/cube.glb, test/features.glb, test/animated.glb, test/skinned.glb, test/gltf/cube.gltf");
