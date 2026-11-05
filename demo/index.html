@@ -18,7 +18,7 @@
   <header class="top">
     <div>
       <h1>gltf2usd.js</h1>
-      <p class="sub">GLB を USDZ / USDA に変換して、元の glTF と並べて確認するテストページ。変換はすべてブラウザ内で行い、ファイルはどこにも送信しません。</p>
+      <p class="sub">glTF / GLB を USDZ / USDA に変換して、元の glTF と並べて確認するテストページ。変換はすべてブラウザ内で行い、ファイルはどこにも送信しません。</p>
     </div>
   </header>
 
@@ -26,10 +26,10 @@
     <section class="input" id="drop">
       <label class="btn primary">
         GLB / glTF を選ぶ
-        <input type="file" id="file" accept=".glb,.gltf,.bin,.png,.jpg,.jpeg,model/gltf-binary,model/gltf+json" multiple hidden>
+        <input type="file" id="file" accept=".glb,.gltf,.bin,.png,.jpg,.jpeg,.webp,model/gltf-binary,model/gltf+json" multiple hidden>
       </label>
       <button class="btn" id="sample" type="button">サンプル: テクスチャ付きキューブ</button>
-      <button class="btn" id="sample-features" type="button">サンプル: 段階 2 の機能</button>
+      <button class="btn" id="sample-features" type="button">サンプル: マテリアル / 拡張機能 / ライト</button>
       <button class="btn" id="sample-gltf" type="button">サンプル: .gltf + 外部ファイル</button>
       <button class="btn" id="sample-anim" type="button">サンプル: アニメーション</button>
       <button class="btn" id="sample-skin" type="button">サンプル: スキン / モーフ</button>
@@ -45,7 +45,7 @@
       <figure class="viewer">
         <figcaption><span class="tag">入力</span> glTF <small>three.js GLTFLoader</small></figcaption>
         <canvas id="view-gltf"></canvas>
-        <p class="overlay" id="overlay-gltf">GLB を読み込むとここに表示されます</p>
+        <p class="overlay" id="overlay-gltf">glTF / GLB を読み込むとここに表示されます</p>
       </figure>
       <figure class="viewer">
         <figcaption><span class="tag out">出力</span> USD <small>デモ内蔵の簡易プレビュー</small></figcaption>

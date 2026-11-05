@@ -268,8 +268,11 @@ async function loadFiles(files) {
 
 let urls = [];
 let usdPreview = null;
+let runId = 0; // a newer run (another file or sample) makes an older, still-running one stop
 
 async function run(glb, name, resources = new Map()) {
+  const id = ++runId;
+  const stale = () => id !== runId;
   const extra = resources.size ? ` + ${resources.size} ファイル` : "";
   $("filename").textContent = `${name} (${fmtBytes(glb.length)})${extra}`;
   showError(null);
@@ -292,15 +295,17 @@ async function run(glb, name, resources = new Map()) {
     usdz = await glbToUsdzAsync(glb, { resources, onWarning: (msg) => converterWarnings.push(msg) });
     ms = performance.now() - t0;
   } catch (err) {
+    if (stale()) return;
     const hint = /was not provided/.test(err.message) ? "\n.gltf が参照する .bin / 画像も一緒に選んでください。" : "";
     showError(`変換に失敗しました: ${err.message}${hint}`);
     for (const id of ["stats", "actions", "panel"]) $(id).hidden = true;
     console.error(err);
     setContent(views[1], null);
     overlay("usd", "変換に失敗しました", true);
-    await showGltf(glb, resources);
+    await showGltf(glb, resources, stale);
     return;
   }
+  if (stale()) return;
 
   // 2) Read the package back and parse the layer
   let entries, layer, usdaText, parseError = null;
@@ -319,7 +324,8 @@ async function run(glb, name, resources = new Map()) {
     : runChecks(entries, layer);
 
   // 4) Previews
-  await showGltf(glb, resources);
+  await showGltf(glb, resources, stale);
+  if (stale()) return;
   let previewWarnings = [];
   if (layer) {
     try {
@@ -365,7 +371,7 @@ async function run(glb, name, resources = new Map()) {
   $("panel").hidden = false;
 }
 
-function showGltf(glb, resources) {
+function showGltf(glb, resources, stale) {
   return new Promise((resolve) => {
     const buf = glb.buffer.slice(glb.byteOffset, glb.byteOffset + glb.byteLength);
     // Serve a .gltf's external files from the selected files, using the same lookup as the converter.
@@ -383,12 +389,14 @@ function showGltf(glb, resources) {
       return blobUrls.get(bytes);
     });
     new GLTFLoader(manager).setMeshoptDecoder(MeshoptDecoder).setDRACOLoader(dracoLoader()).parse(buf, "", (gltf) => {
+      if (stale()) return resolve();
       lastGltf = gltf;
       fixTextureTransforms(gltf.scene);
       setContent(views[0], gltf.scene);
       overlay("gltf", null);
       resolve();
     }, (err) => {
+      if (stale()) return resolve();
       setContent(views[0], null);
       overlay("gltf", `GLTFLoader で読み込めませんでした: ${err.message ?? err}`, true);
       resolve();
@@ -535,7 +543,11 @@ function renderGltf(glb) {
     ["extensionsRequired", (json.extensionsRequired ?? []).join(", ") || "—"],
   ];
   let html = `<table><tbody>${rows.map(([k, v]) => `<tr><th>${esc(k)}</th><td class="name">${esc(v)}</td></tr>`).join("")}</tbody></table>`;
-  if (n("animations") || n("skins")) html += '<p class="hint">アニメーション / スキンは未対応です（段階 3・4）。出力には含まれません。</p>';
+  // Current limits only; everything else that is dropped shows up in the converter's warnings.
+  const notes = [];
+  if (n("animations") > 1) notes.push(`アニメーションは ${n("animations")} 本のうち 1 本だけ変換します（USD のタイムラインは 1 本）。`);
+  if (n("cameras")) notes.push("カメラは未対応で、出力には含まれません。");
+  for (const note of notes) html += `<p class="hint">${esc(note)}</p>`;
   $("tab-gltf").innerHTML = html;
 }
 

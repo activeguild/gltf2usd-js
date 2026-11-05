@@ -19,6 +19,8 @@ const types = {
   ".usda": "text/plain; charset=utf-8",
   ".png": "image/png",
   ".jpg": "image/jpeg",
+  ".webp": "image/webp",
+  ".wasm": "application/wasm",
 };
 
 createServer(async (req, res) => {
@@ -27,7 +29,14 @@ createServer(async (req, res) => {
     res.writeHead(302, { location: "/demo/" });
     return res.end();
   }
-  let path = normalize(join(root, decodeURIComponent(url.pathname)));
+  let pathname;
+  try {
+    pathname = decodeURIComponent(url.pathname);
+  } catch {
+    res.writeHead(400); // malformed percent-encoding; without this the server process crashed
+    return res.end("bad request");
+  }
+  let path = normalize(join(root, pathname));
   if (path !== root.replace(/[\\/]$/, "") && !path.startsWith(root.endsWith(sep) ? root : root + sep)) {
     res.writeHead(403);
     return res.end("forbidden");
