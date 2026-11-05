@@ -66,6 +66,9 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      - name: Type check (src/index.d.ts)
+        run: npm run test:types
+
       - name: Install the OpenUSD validators
         run: pip install usd-core==26.11 # the version the outputs were validated with
 
