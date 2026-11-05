@@ -27,7 +27,7 @@
     "type": "git",
     "url": "git+https://github.com/activeguild/gltf2usd-js.git"
   },
-  "license": "MIT",
+  "license": "MIT AND Apache-2.0",
   "author": "activeguild",
   "type": "module",
   "main": "./src/index.js",

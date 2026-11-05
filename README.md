@@ -253,6 +253,6 @@ Design notes and the reasons behind the output layout are in [CLAUDE.md](CLAUDE.
 
 [MIT](LICENSE) © activeguild
 
-Parts of the Draco decoder (`src/draco.js`) are a translation of Google's reference decoder and are licensed under the Apache License 2.0; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Parts of the Draco decoder (`src/draco.js`) are a translation of Google's reference decoder and are licensed under the Apache License 2.0 (hence `MIT AND Apache-2.0` in `package.json`); see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 The output is plain USD. "OpenUSD" and "Pixar" are used here only to name the format and its reference validator; this project is not affiliated with them.

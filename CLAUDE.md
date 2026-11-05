@@ -371,7 +371,8 @@ npm run demo                               # 見た目の確認: サンプルと
 
 ## npm 公開・README
 
-- パッケージ名 `gltf2usd-js`、MIT（著作権者 activeguild、`LICENSE`）。`package.json` の `files` で公開するのは `src/`・`cli.js`・
+- パッケージ名 `gltf2usd-js`、MIT（著作権者 activeguild、`LICENSE`）。`src/draco.js` の一部は Draco（Apache 2.0、Copyright 2016-2017
+  The Draco Authors）の翻訳なので、package.json の license は `MIT AND Apache-2.0`、本文と帰属は `THIRD_PARTY_NOTICES.md`。`package.json` の `files` で公開するのは `src/`・`cli.js`・
   `README.md`・`README.ja.md`・`LICENSE`・`THIRD_PARTY_NOTICES.md` だけ（test / demo / CLAUDE.md は含めない）。`exports` は `.` と `./package.json` のみ。
   bin は `glb2usd`（1 つだけなので `npx gltf2usd-js in.glb out.usdz` でも動く）。`prepublishOnly` で `npm test`。Node は 18 以上。
 - 公開前の確認: `npm pack --dry-run` で中身を見て、tarball を空のプロジェクトに入れて `import "gltf2usd-js"` と `npx glb2usd` を試す。

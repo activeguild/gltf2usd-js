@@ -253,6 +253,6 @@ git push origin v0.2.0
 
 [MIT](LICENSE) © activeguild
 
-Draco のデコーダ（`src/draco.js`）の一部は Google のリファレンスデコーダを翻訳したもので、Apache License 2.0 に従います。[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) を参照してください。
+Draco のデコーダ（`src/draco.js`）の一部は Google のリファレンスデコーダを翻訳したもので、Apache License 2.0 に従います（そのため `package.json` の license は `MIT AND Apache-2.0`）。[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) を参照してください。
 
 出力は普通の USD です。「OpenUSD」「Pixar」の名前は、フォーマットと参照用のバリデータを指すためだけに使っています。このプロジェクトはそれらとは関係ありません。

@@ -9,7 +9,7 @@
 // reference decoder's C++ code, modified for this project:
 //
 //   Draco, https://github.com/google/draco
-//   Copyright 2016 The Draco Authors
+//   Copyright 2016-2017 The Draco Authors
 //   Licensed under the Apache License, Version 2.0 (see THIRD_PARTY_NOTICES.md)
 //
 // The output (indices and per-point attribute values) is byte-identical to the reference
