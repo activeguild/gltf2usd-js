@@ -35,6 +35,8 @@ npm install gltf2usd-js
 
 Node.js 18 以降が必要です。ブラウザは、ES モジュールに対応した最近のものなら動きます。
 
+TypeScript の型定義（`src/index.d.ts`）を同梱しています。`@types` のパッケージは不要です。
+
 ## 使い方
 
 ### Node.js
@@ -132,6 +134,15 @@ try {
 
 `parseGltf`、`parseGLB`、`GltfAsset`（パースと accessor のデコード）、`gltfToStage`（glTF → メモリ上の USD レイヤー）、`writeUsda`（レイヤー → テキスト）、`packUsdz`（ファイル群 → USDZ）、`browserImageConverter`、`DEFAULT_LIMITS`、`DataUnavailableError`。
 
+型定義からは、オプションと戻り値の型（`ConvertOptions`、`AsyncConvertOptions`、`StageOptions`、`GltfInput`、`ResourceSource`、`ImageConverter`、`Limits`、`UsdaResult`、`PackagedFile` など）も import できます。
+
+```ts
+import { glbToUsdz, type ConvertOptions } from "gltf2usd-js";
+
+const options: ConvertOptions = { animationMode: "skeleton", onWarning: console.warn };
+const usdz: Uint8Array = glbToUsdz(bytes, options);
+```
+
 ## 対応している glTF の機能
 
 **形状**
@@ -219,6 +230,7 @@ GLB をページにドロップすると、元の glTF（three.js）と変換し
 
 ```bash
 npm test                        # 単体テスト（ネットワーク不要）
+npm run test:types              # test/types.ts を src/index.d.ts で型チェック（TypeScript は npx で取得）
 npm run test:integration        # Khronos glTF-Sample-Assets の 19 モデル（初回だけダウンロード。コミットと SHA-256 で固定）
 pip install usd-core            # 任意。結合テストと test/validate.py で OpenUSD のバリデータを使えるようになる
 python3 test/validate.py model.usdz
@@ -233,7 +245,7 @@ git tag v0.2.0
 git push origin v0.2.0
 ```
 
-バージョンはタグから取るので、先に `package.json` を書き換える必要はありません。`v0.2.0-beta.1` のようなプレリリースのタグは、npm の dist-tag `next` で公開します。単体テスト・結合テスト・OpenUSD のバリデータが通らないとき、そのバージョンがすでに npm にあるときは公開しません。リポジトリのシークレット `NPM_TOKEN` に npm の automation トークンが必要です。公開は provenance 付きです。
+バージョンはタグから取るので、先に `package.json` を書き換える必要はありません。`v0.2.0-beta.1` のようなプレリリースのタグは、npm の dist-tag `next` で公開します。単体テスト・型チェック・結合テスト・OpenUSD のバリデータが通らないとき、そのバージョンがすでに npm にあるときは公開しません。リポジトリのシークレット `NPM_TOKEN` に npm の automation トークンが必要です。公開は provenance 付きです。
 
 設計メモと、出力の構成をこうした理由は [CLAUDE.md](CLAUDE.md) にあります。
 
