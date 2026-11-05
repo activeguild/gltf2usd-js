@@ -343,4 +343,12 @@ const cubeWarnings = [];
 glbToUsda(glb, { onWarning: (m) => cubeWarnings.push(m) });
 assert(cubeWarnings.length === 0, `cube has no warnings: ${cubeWarnings}`);
 
+// src/index.d.ts declares exactly the runtime exports of src/index.js (types: npm run test:types).
+{
+  const runtime = Object.keys(await import("../src/index.js")).sort();
+  const dts = readFileSync(new URL("../src/index.d.ts", import.meta.url), "utf8");
+  const declared = [...dts.matchAll(/^export (?:function|class|const) (\w+)/gm)].map((m) => m[1]).sort();
+  assert(JSON.stringify(declared) === JSON.stringify(runtime), `index.d.ts exports ${declared} vs index.js ${runtime}`);
+}
+
 console.log("all tests passed;", usdz.length, "bytes usdz");

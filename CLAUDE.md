@@ -10,7 +10,7 @@ npm パッケージ名: `gltf2usd-js`。
 
 ## 現在の状態（段階 1〜4 完了。要相談事項は「要相談」を参照）
 
-`src/` 14 ファイル。テスト GLB（`cube.glb`、`features.glb`、`animated.glb`、`skinned.glb`、外部ファイル付き `gltf/cube.gltf`）と
+`src/` 14 ファイル + 型定義 `index.d.ts`。テスト GLB（`cube.glb`、`features.glb`、`animated.glb`、`skinned.glb`、外部ファイル付き `gltf/cube.gltf`）と
 Khronos サンプル（BoxTextured / CesiumMilkTruck / DamagedHelmet / BoxAnimated / InterpolationTest / RiggedSimple / RiggedFigure /
 CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版のある 16 モデルすべて）を OpenUSD 26.11 の
 全 30 バリデータに通して error 0 を確認済み。
@@ -32,6 +32,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
 | `src/images.js` | `imagesToConvert()`, `browserImageConverter()` | USDZ に入れられない画像（WebP）の変換。非同期 API（`glbToUsdzAsync`）から使う |
 | `src/png.js` | `encodeGrayAlphaPng()` | 変換器が自分で作るテクスチャ（頂点アルファのランプ）用の小さな PNG 書き出し |
 | `src/usdz.js` | `packUsdz(entries)` → `Uint8Array`、`planLayout()`、`UsdzLimitError` | stored-only zip、64 バイトアライン、CRC32 自前。ZIP の上限とエントリ名を書く前に検査 |
+| `src/index.d.ts` | 公開 API の型定義（手書き） | `src/index.js` の export を変えたら必ず合わせる。export 名の一致は `test/run.js`、型は `npm run test:types`（`test/types.ts`） |
 | `src/index.js`| `glbToUsda()`, `glbToUsdz()`, `gltfToUsda()`, `glbToUsdaAsync()`, `glbToUsdzAsync()` | 公開 API。名前は glb だが `.gltf` も受け付ける。Async 版は WebP などの画像を変換してから変換する |
 | `cli.js`      | `node cli.js in.glb\|in.gltf out.usdz\|out.usda`（`--help` / `--version`） | `.gltf` の外部ファイルは同じフォルダ以下からのみ読む。npm の bin は `glb2usd` |
 | `test/cube-glb.js` | テスト用 GLB をメモリ上で生成（Node / ブラウザ共用） | `buildCubeGlb()`（段階 1）、`buildFeatureGlb()`（段階 2）、`buildAnimatedGlb()`（段階 3）、`buildSkinnedGlb()`（段階 4）、`buildCubeGltf()` |
@@ -303,6 +304,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
 
 ```bash
 npm test                                   # GLB 生成 + JS テスト
+npm run test:types                         # 型定義の検査（src/index.js の export を変えたとき）
 node cli.js test/cube.glb /tmp/cube.usdz
 pip install usd-core --break-system-packages   # 初回のみ
 python3 test/validate.py /tmp/cube.usdz    # "0 validation error(s)" を確認
@@ -374,11 +376,14 @@ npm run demo                               # 見た目の確認: サンプルと
   bin は `glb2usd`（1 つだけなので `npx gltf2usd-js in.glb out.usdz` でも動く）。`prepublishOnly` で `npm test`。Node は 18 以上。
 - 公開前の確認: `npm pack --dry-run` で中身を見て、tarball を空のプロジェクトに入れて `import "gltf2usd-js"` と `npx glb2usd` を試す。
 - **公開は GitHub Actions（`.github/workflows/publish.yml`）。** `v<semver>` のタグを push すると、タグのバージョンを
-  `npm version --no-git-tag-version` で package.json に入れ、`npm test`・`usd-core==26.11` で結合テスト（OpenUSD 検証込み）・
+  `npm version --no-git-tag-version` で package.json に入れ、`npm test`・`npm run test:types`・`usd-core==26.11` で結合テスト（OpenUSD 検証込み）・
   `npm pack --dry-run` のあと `npm publish --provenance --access public` する。プレリリース（`-` を含む）は dist-tag `next`、それ以外は `latest`。
   同じバージョンが npm にあれば止める。シークレット `NPM_TOKEN`（npm の automation トークン）が必要。リポジトリの package.json の
   version はタグに合わせて手で上げてもよいが、公開されるのはタグのバージョン。
-- TypeScript の型定義はまだない（issue #9）。
+- **TypeScript の型定義は手書きの `src/index.d.ts`**（issue #9）。ビルド工程と devDependency を増やさないため JSDoc からの生成はしない。
+  `package.json` の `types` と `exports["."].types` から参照。`test/types.ts` をパッケージ名で import して `tsc --noEmit`（`npm run test:types`、
+  TypeScript は `npx` でバージョン固定）で検査し、`@ts-expect-error` で誤用が弾かれることも確かめる。公開ワークフローでも実行する。
+  `src/index.js` の export と `.d.ts` の `export function / class / const` の名前の一致は `npm test`（`test/run.js`）で確認。
 - **README は英語（`README.md`）が既定、日本語は `README.ja.md`。** 先頭の言語リンクで切り替える。内容を変えたら両方を同じように直す。
   README は外部の利用者向け（インストール・使い方・API・対応機能・制限・ビューア・検証・デモ・開発）。設計の経緯はこの CLAUDE.md に書く。
 

@@ -35,6 +35,8 @@ npm install gltf2usd-js
 
 Node.js 18 or later. In browsers, any modern browser that supports ES modules works.
 
+TypeScript type definitions are included (`src/index.d.ts`); no `@types` package is needed.
+
 ## Usage
 
 ### Node.js
@@ -132,6 +134,15 @@ try {
 
 `parseGltf`, `parseGLB`, `GltfAsset` (parsing and accessor decoding), `gltfToStage` (glTF → an in-memory USD layer), `writeUsda` (layer → text), `packUsdz` (files → USDZ), `browserImageConverter`, `DEFAULT_LIMITS`, `DataUnavailableError`.
 
+The type definitions also export the option and result types: `ConvertOptions`, `AsyncConvertOptions`, `StageOptions`, `GltfInput`, `ResourceSource`, `ImageConverter`, `Limits`, `UsdaResult`, `PackagedFile`, and others.
+
+```ts
+import { glbToUsdz, type ConvertOptions } from "gltf2usd-js";
+
+const options: ConvertOptions = { animationMode: "skeleton", onWarning: console.warn };
+const usdz: Uint8Array = glbToUsdz(bytes, options);
+```
+
 ## Supported glTF features
 
 **Geometry**
@@ -219,6 +230,7 @@ Drop a GLB onto the page to see the original glTF (three.js) and the converted U
 
 ```bash
 npm test                        # unit tests, no network
+npm run test:types              # type-checks test/types.ts against src/index.d.ts (fetches TypeScript with npx)
 npm run test:integration        # 22 Khronos glTF-Sample-Assets models (downloaded once, pinned by commit and SHA-256)
 pip install usd-core            # optional: lets the integration test and test/validate.py run the OpenUSD validators
 python3 test/validate.py model.usdz
@@ -233,7 +245,7 @@ git tag v0.2.0
 git push origin v0.2.0
 ```
 
-The version comes from the tag, so `package.json` does not have to be bumped first. A prerelease tag such as `v0.2.0-beta.1` is published under the npm dist-tag `next`. Nothing is published unless the unit tests, the integration test and the OpenUSD validators pass, or if that version is already on npm. The workflow needs an npm automation token in the repository secret `NPM_TOKEN`, and it publishes with provenance.
+The version comes from the tag, so `package.json` does not have to be bumped first. A prerelease tag such as `v0.2.0-beta.1` is published under the npm dist-tag `next`. Nothing is published unless the unit tests, the type check, the integration test and the OpenUSD validators pass, or if that version is already on npm. The workflow needs an npm automation token in the repository secret `NPM_TOKEN`, and it publishes with provenance.
 
 Design notes and the reasons behind the output layout are in [CLAUDE.md](CLAUDE.md) (in Japanese).
 
