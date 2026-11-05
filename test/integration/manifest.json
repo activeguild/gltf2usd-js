@@ -232,7 +232,7 @@
     {
       "id": "Box-draco",
       "features": [
-        "KHR_draco_mesh_compression (no fallback: skipped)"
+        "KHR_draco_mesh_compression (standard edgebreaker, no fallback)"
       ],
       "files": [
         {
@@ -250,7 +250,7 @@
     {
       "id": "CesiumMilkTruck-draco",
       "features": [
-        "KHR_draco_mesh_compression (no fallback: skipped)",
+        "KHR_draco_mesh_compression (standard + valence edgebreaker)",
         "animation"
       ],
       "files": [
@@ -268,6 +268,70 @@
           "path": "Models/CesiumMilkTruck/glTF-Draco/CesiumMilkTruck.jpg",
           "sha256": "5041b9dcdc5c1587648d829fee1f2e4df373befb29aaf15742d39f83d64e7e2e",
           "bytes": 218979
+        }
+      ]
+    },
+    {
+      "id": "BrainStem-draco",
+      "features": [
+        "KHR_draco_mesh_compression (valence edgebreaker)",
+        "skinning",
+        "animation"
+      ],
+      "files": [
+        {
+          "path": "Models/BrainStem/glTF-Draco/BrainStem.gltf",
+          "sha256": "d5f35c011854baa9ba8bc89e076f0a3c5a3b64f7b956c5378bfb0b99041c9c40",
+          "bytes": 187357
+        },
+        {
+          "path": "Models/BrainStem/glTF-Draco/BrainStem0.bin",
+          "sha256": "39346163441a1d03258052be80befcb17933f6bae4606aab7deb4f95258ba85c",
+          "bytes": 1802012
+        }
+      ]
+    },
+    {
+      "id": "MorphPrimitivesTest-draco",
+      "features": [
+        "KHR_draco_mesh_compression (sequential)",
+        "morph targets"
+      ],
+      "files": [
+        {
+          "path": "Models/MorphPrimitivesTest/glTF-Draco/MorphPrimitivesTest.gltf",
+          "sha256": "6133d2a743b536dca87be279deeef1e1c50761ee9a932814561696221db576d4",
+          "bytes": 5295
+        },
+        {
+          "path": "Models/MorphPrimitivesTest/glTF-Draco/MorphPrimitivesTest.bin",
+          "sha256": "4c600738509168bd0dfad3b67bf8ff9b9ae0bf331b7a1531958029ff9d76e14d",
+          "bytes": 880
+        },
+        {
+          "path": "Models/MorphPrimitivesTest/glTF-Draco/uv_texture.jpg",
+          "sha256": "d498c54b30f096b663b161f37ee64397253d6fa15ee4f8c03082c890f6065031",
+          "bytes": 49535
+        }
+      ]
+    },
+    {
+      "id": "RiggedFigure-draco",
+      "features": [
+        "KHR_draco_mesh_compression",
+        "skinning",
+        "animation"
+      ],
+      "files": [
+        {
+          "path": "Models/RiggedFigure/glTF-Draco/RiggedFigure.gltf",
+          "sha256": "25039daae7c4cd7394b39180341fd2519af82d6ac6ca2e8bec737cb9866b6d69",
+          "bytes": 50939
+        },
+        {
+          "path": "Models/RiggedFigure/glTF-Draco/RiggedFigure0.bin",
+          "sha256": "ef8c02bf4d186b058d21d5615bd133e75ec5be46f23cc4943d2543d745ede5cb",
+          "bytes": 6172
         }
       ]
     },

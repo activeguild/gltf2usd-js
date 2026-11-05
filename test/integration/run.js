@@ -86,17 +86,15 @@ function checkContent(json, usda, zipNames, warnings, errors) {
   const count = (re) => (usda.match(re) || []).length;
   const prims = (json.meshes || []).flatMap((m) => m.primitives || []);
   const triangles = prims.filter((p) => (p.mode ?? 4) >= 4 && p.attributes?.POSITION !== undefined);
-  const dracoOnly = triangles.filter((p) => p.extensions?.KHR_draco_mesh_compression && json.accessors?.[p.attributes.POSITION]?.bufferView === undefined);
   const meshPrims = count(/def Mesh "/g);
-  if (triangles.length > dracoOnly.length && !meshPrims) errors.push("content: no Mesh prims were written");
-  if (dracoOnly.length) {
-    if (!warnings.some((w) => /Draco/.test(w))) errors.push("content: Draco primitives were skipped without a warning");
-  }
+  if (triangles.length && !meshPrims) errors.push("content: no Mesh prims were written");
+  // KHR_draco_mesh_compression is decoded (src/draco.js): no primitive may be skipped or fall back.
+  for (const w of warnings) if (/KHR_draco_mesh_compression/.test(w)) errors.push(`content: Draco data was not decoded: ${w}`);
   // Unsupported compression must be reported, never silently dropped.
   if ((json.extensionsUsed || []).includes("KHR_meshopt_compression") && !warnings.some((w) => /KHR_meshopt_compression/.test(w))) {
     errors.push("content: KHR_meshopt_compression is not reported as unsupported");
   }
-  const usedMaterials = new Set(triangles.filter((p) => !dracoOnly.includes(p)).map((p) => p.material).filter((m) => m !== undefined));
+  const usedMaterials = new Set(triangles.map((p) => p.material).filter((m) => m !== undefined));
   const materialPrims = count(/def Material "/g);
   if (materialPrims < usedMaterials.size) errors.push(`content: ${usedMaterials.size} glTF materials are used, ${materialPrims} Material prims written`);
   const pngJpeg = (json.images || []).filter((img) => /png|jpe?g/i.test(img.mimeType ?? img.uri ?? "png")).length;

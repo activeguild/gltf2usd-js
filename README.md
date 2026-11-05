@@ -174,9 +174,9 @@ const usdz: Uint8Array = glbToUsdz(bytes, options);
 | `KHR_lights_punctual` | ✅ UsdLux (intensities copied as-is; AR Quick Look ignores lights) |
 | `KHR_mesh_quantization` | ✅ |
 | `EXT_meshopt_compression` | ✅ built-in decoder |
+| `KHR_draco_mesh_compression` | ✅ built-in decoder (Draco bitstream 2.2; output identical to Google's decoder) |
 | `EXT_mesh_gpu_instancing` | ✅ one instanceable reference per instance (custom `_` attributes are ignored, with a warning) |
 | `EXT_texture_webp` | ✅ async API only (converted to PNG / JPEG) |
-| `KHR_draco_mesh_compression` | ⚠️ the uncompressed fallback is used when the file has one; otherwise the primitive is skipped with a warning |
 | `KHR_meshopt_compression` | ❌ compressed data is skipped with a warning |
 
 ## Limitations
@@ -231,7 +231,7 @@ Drop a GLB onto the page to see the original glTF (three.js) and the converted U
 ```bash
 npm test                        # unit tests, no network
 npm run test:types              # type-checks test/types.ts against src/index.d.ts (fetches TypeScript with npx)
-npm run test:integration        # 19 Khronos glTF-Sample-Assets models (downloaded once, pinned by commit and SHA-256)
+npm run test:integration        # 22 Khronos glTF-Sample-Assets models (downloaded once, pinned by commit and SHA-256)
 pip install usd-core            # optional: lets the integration test and test/validate.py run the OpenUSD validators
 python3 test/validate.py model.usdz
 ```
@@ -252,5 +252,7 @@ Design notes and the reasons behind the output layout are in [CLAUDE.md](CLAUDE.
 ## License
 
 [MIT](LICENSE) © activeguild
+
+Parts of the Draco decoder (`src/draco.js`) are a translation of Google's reference decoder and are licensed under the Apache License 2.0 (hence `MIT AND Apache-2.0` in `package.json`); see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 The output is plain USD. "OpenUSD" and "Pixar" are used here only to name the format and its reference validator; this project is not affiliated with them.

@@ -314,18 +314,21 @@ assert(f.usda.includes('def Mesh "CubeC"') && f.usda.includes('def Xform "CubeC_
 // ---- Compressed data that cannot be decoded is skipped, not written as zeros ----
 {
   const { gltf, resources } = buildCubeGltf();
-  // Draco without an uncompressed fallback: POSITION accessor has no bufferView.
+  // Draco data that does not decode (the view holds plain floats), without an uncompressed
+  // fallback: POSITION accessor has no bufferView.
   const draco = JSON.parse(gltf);
   draco.extensionsUsed = draco.extensionsRequired = ["KHR_draco_mesh_compression"];
   draco.meshes[0].primitives[0].extensions = { KHR_draco_mesh_compression: { bufferView: 0, attributes: { POSITION: 0 } } };
   delete draco.accessors[0].bufferView;
   const w1 = [];
   const d = glbToUsda(draco, { resources, onWarning: (m) => w1.push(m) }).usda;
-  assert(!d.includes("def Mesh") && w1.some((m) => m.includes("Draco-compressed") && m.includes("skipped")), `Draco without fallback skipped: ${w1}`);
-  // Draco with a fallback (accessors keep their bufferViews) converts normally.
+  assert(!d.includes("def Mesh") && w1.some((m) => m.includes("KHR_draco_mesh_compression") && m.includes("could not be decoded") && m.includes("skipped")), `undecodable Draco without fallback skipped: ${w1}`);
+  // With a fallback (accessors keep their bufferViews) the fallback is used, with a warning.
   const withFallback = JSON.parse(gltf);
   withFallback.meshes[0].primitives[0].extensions = { KHR_draco_mesh_compression: { bufferView: 0, attributes: { POSITION: 0 } } };
-  assert(glbToUsda(withFallback, { resources }).usda === usda, "Draco with uncompressed fallback uses the fallback");
+  const w3 = [];
+  assert(glbToUsda(withFallback, { resources, onWarning: (m) => w3.push(m) }).usda === usda, "undecodable Draco with uncompressed fallback uses the fallback");
+  assert(w3.length === 1 && w3[0].includes("uncompressed fallback is used"), `fallback warning: ${w3}`);
   // EXT_meshopt_compression: the view's buffer is a data-less fallback.
   const mo = JSON.parse(gltf);
   mo.buffers.push({ byteLength: 288, extensions: { EXT_meshopt_compression: { fallback: true } } });

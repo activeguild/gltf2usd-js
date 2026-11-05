@@ -59,8 +59,9 @@ export class UsdzLimitError extends Error {
 }
 
 /**
- * An accessor's bytes are not in the file in readable form (e.g. a meshopt / Draco
- * fallback buffer). The converters skip the affected data and warn instead of throwing it.
+ * An accessor's bytes are not in the file in readable form (e.g. a meshopt fallback buffer, or
+ * Draco data that cannot be decoded and has no uncompressed fallback). The converters skip the
+ * affected data and warn instead of throwing it.
  */
 export class DataUnavailableError extends Error {
   constructor(message: string);
