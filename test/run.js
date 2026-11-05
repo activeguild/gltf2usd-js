@@ -3,6 +3,8 @@ import { glbToUsda, glbToUsdz } from "../src/index.js";
 import { buildCubeGltf } from "./cube-glb.js";
 import { decodeMeshopt } from "../src/meshopt.js";
 import { VECTORS, CUBE_VIEWS } from "./meshopt-vectors.js";
+import { fmt } from "../src/usda.js";
+import { crc32 } from "../src/usdz.js";
 
 const glb = readFileSync(new URL("./cube.glb", import.meta.url));
 const { usda, files } = glbToUsda(glb);
@@ -336,6 +338,35 @@ assert(f.usda.includes('def Mesh "CubeC"') && f.usda.includes('def Xform "CubeC_
   const w2 = [];
   const m = glbToUsda(mo, { resources, onWarning: (x) => w2.push(x) }).usda;
   assert(!m.includes("def Mesh") && w2.some((x) => x.includes("EXT_meshopt_compression") && x.includes("skipped")), `meshopt view skipped: ${w2}`);
+}
+
+// fmt() takes an integer fast path; it must match the reference toPrecision(7) formatting exactly.
+{
+  const ref = (v) => (Number.isFinite(v) ? Number(v.toPrecision(7)).toString() : "0");
+  const special = [0, -0, NaN, Infinity, -Infinity, 1e-4, 9.9999995e-5, 1e-5, 1e7, 9999999.5, 9999999.4, 1, -1, 0.5, 0.1, 1e6, 999999.95,
+    1.0000005, 2.5e-7, 123456789, 1e21, 1e-7, 1e-6, -3.14159265, 0.00012345675, 1234567.5];
+  let seed = 12345;
+  const rnd = () => ((seed = (Math.imul(seed, 1103515245) + 12345) >>> 0) / 2 ** 32);
+  const f32 = new Float32Array(1);
+  const u32 = new Uint32Array(f32.buffer);
+  const values = [...special];
+  for (let i = 0; i < 200000; i++) {
+    u32[0] = (rnd() * 2 ** 32) >>> 0;
+    values.push(f32[0], (rnd() - 0.5) * 10 ** (rnd() * 14 - 6), Math.round(rnd() * 1e6) / 10 ** Math.floor(rnd() * 8));
+  }
+  for (const v of values) assert(fmt(v) === ref(v), `fmt(${v}) = ${fmt(v)}, expected ${ref(v)}`);
+}
+
+// crc32 (slice-by-8) matches the bitwise definition for every length around the 8-byte step.
+{
+  const slow = (b) => {
+    let c = 0xffffffff;
+    for (const x of b) { c ^= x; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; }
+    return (c ^ 0xffffffff) >>> 0;
+  };
+  const bytes = Uint8Array.from({ length: 300 }, (_, i) => (i * 131 + 7) & 0xff);
+  for (let n = 0; n <= bytes.length; n++) assert(crc32(bytes.subarray(1, n)) === slow(bytes.subarray(1, n)), `crc32 of ${n} bytes`);
+  assert(crc32(new TextEncoder().encode("123456789")) === 0xcbf43926, "crc32 check value");
 }
 
 // Cube has nothing to warn about.

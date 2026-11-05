@@ -153,6 +153,10 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
 7. **prim 名**は `[A-Za-z_][A-Za-z0-9_]*` に `sanitize()` し、兄弟間で `uniqueName()` で重複回避。
    マテリアル名は Mesh が先に参照するため `uniqueMaterialName()` でキャッシュして決定的に生成する。
 8. **数値フォーマット**は `toPrecision(7)` 経由（float 精度相当、ファイルサイズ抑制）。
+   出力の定義は `Number(v.toPrecision(7)).toString()` のまま（`fmtSlow()`）で、1e-4 ≤ |v| < 1e7 は整数演算の高速経路
+   （`fastFmt()`、丸めが 0.5 付近・桁数の判定ずれは `fmtSlow()` に戻す）。大きな配列は数 KB ごとの文字列チャンクで組み立て、CRC32 は slice-by-8。
+   USDA の生成が全体の 6〜8 割を占めていたため。変更前後で fixtures と Khronos サンプル（27 入力 × animationMode 2 通り）の USDZ が
+   バイト単位で一致し、全体で 1.3〜1.8 倍速い（DamagedHelmet 105 → 60 ms、BrainStem-meshopt 480 → 345 ms）。`test/run.js` で旧定義と照合している。
 9. **KHR_texture_transform** は glTF の V 下向き空間で `uv' = T·R·S·uv`（R = [[cos, sin], [-sin, cos]]）。
    USD の st = (u, 1-v) に書き直すと `UsdTransform2d` そのもの（scale → 反時計回り rotation [度] → translation）になり、
    `translation = (offset.x + sin·scale.y, 1 - offset.y - cos·scale.y)`。導出は `textureTransform()` のコメント参照。

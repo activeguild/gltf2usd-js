@@ -104,13 +104,22 @@ function fmtValue(typeName, v) {
   if (typeName.endsWith("[]")) {
     const base = typeName.slice(0, -2);
     if (base === "matrix4d") {
-      const out = [];
-      for (let i = 0; i < v.length; i += 16) out.push(fmtMatrix(v.slice(i, i + 16)));
-      return `[${out.join(", ")}]`;
+      let s = "[";
+      for (let i = 0; i < v.length; i += 16) s += (i ? ", " : "") + fmtMatrix(v, i);
+      return `${s}]`;
     }
     const n = TUPLE_SIZE[base];
     if (n) return `[${fmtVecs(v, n)}]`;
-    return `[${Array.from(v, (x) => fmtScalar(base, x)).join(", ")}]`;
+    const chunks = [];
+    let s = "";
+    const int = INT_TYPES.has(base);
+    for (let i = 0; i < v.length; i++) {
+      if (i) s += ", ";
+      s += int ? String(Math.trunc(v[i])) : fmtScalar(base, v[i]);
+      if (s.length > 4096) { chunks.push(s); s = ""; }
+    }
+    chunks.push(s);
+    return `[${chunks.join("")}]`;
   }
   if (typeName === "matrix4d") return fmtMatrix(v);
   if (TUPLE_SIZE[typeName]) return fmtTuple(v);
@@ -140,8 +149,44 @@ function quote(s) {
 
 /** float-precision formatting (7 significant digits) keeps files small. */
 export function fmt(v) {
+  const a = v < 0 ? -v : v;
+  if (a >= 1e-4 && a < 1e7) {
+    const s = fastFmt(a);
+    if (s !== null) return v < 0 ? `-${s}` : s;
+  } else if (a === 0) {
+    return "0";
+  }
+  return fmtSlow(v);
+}
+
+/** The reference definition: what fmt() returns for every value. */
+function fmtSlow(v) {
   if (!Number.isFinite(v)) return "0";
   return Number(v.toPrecision(7)).toString();
+}
+
+const POW10 = [1, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11];
+
+/**
+ * fmtSlow() for 1e-4 <= a < 1e7 without toPrecision: scale to a 7-digit integer, round, and
+ * place the decimal point. Number(<7 digits>).toString() is those digits without trailing
+ * zeros (no exponent form in this range). The scaled value is within a few ulps (< 1e-8) of
+ * the exact product, so only values within 1e-4 of a rounding tie, or whose digit count
+ * Math.log10 got wrong, could round differently; those return null and take the slow path.
+ */
+function fastFmt(a) {
+  const k = 6 - Math.floor(Math.log10(a)); // decimal places for 7 significant digits: 0..10
+  const scaled = a * POW10[k];
+  const floor = Math.floor(scaled);
+  const frac = scaled - floor;
+  if (frac > 0.4999 && frac < 0.5001) return null;
+  const r = frac < 0.5 ? floor : floor + 1;
+  if (r < 1e6 || r >= 1e7) return null;
+  const digits = String(r);
+  let end = 7;
+  while (end > 7 - k && digits.charCodeAt(end - 1) === 48) end--;
+  if (k >= 7) return `0.${"000000".slice(0, k - 7)}${digits.slice(0, end)}`;
+  return end > 7 - k ? `${digits.slice(0, 7 - k)}.${digits.slice(7 - k, end)}` : digits.slice(0, 7 - k);
 }
 
 /** Time codes keep more digits than values (long clips at 24 fps reach five digits). */
@@ -150,21 +195,32 @@ function fmtTime(t) {
 }
 
 function fmtTuple(arr) {
-  return `(${Array.from(arr, fmt).join(", ")})`;
+  let s = "(";
+  for (let i = 0; i < arr.length; i++) s += i ? `, ${fmt(arr[i])}` : fmt(arr[i]);
+  return `${s})`;
 }
 
+// Large arrays: tuples are appended to a short string that is flushed into a list of chunks
+// every few KB. Joining one array entry per tuple (the old way) or one ever-growing string
+// both spent most of the time in allocation and GC.
 function fmtVecs(data, n) {
-  const out = [];
+  const chunks = [];
+  let s = "";
   for (let i = 0; i < data.length; i += n) {
-    const parts = [];
-    for (let c = 0; c < n; c++) parts.push(fmt(data[i + c]));
-    out.push(`(${parts.join(", ")})`);
+    s += i ? ", (" : "(";
+    for (let c = 0; c < n; c++) s += c ? `, ${fmt(data[i + c])}` : fmt(data[i + c]);
+    s += ")";
+    if (s.length > 4096) { chunks.push(s); s = ""; }
   }
-  return out.join(", ");
+  chunks.push(s);
+  return chunks.join("");
 }
 
-function fmtMatrix(m) {
-  const rows = [];
-  for (let r = 0; r < 4; r++) rows.push(fmtTuple(m.slice(r * 4, r * 4 + 4)));
-  return `( ${rows.join(", ")} )`;
+function fmtMatrix(m, o = 0) {
+  let s = "( ";
+  for (let r = 0; r < 4; r++) {
+    const b = o + r * 4;
+    s += `${r ? ", " : ""}(${fmt(m[b])}, ${fmt(m[b + 1])}, ${fmt(m[b + 2])}, ${fmt(m[b + 3])})`;
+  }
+  return `${s} )`;
 }
