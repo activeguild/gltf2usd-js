@@ -168,17 +168,33 @@ function concat(chunks, total) {
   return out;
 }
 
-let CRC_TABLE = null;
-export function crc32(bytes) {
-  if (!CRC_TABLE) {
-    CRC_TABLE = new Uint32Array(256);
-    for (let n = 0; n < 256; n++) {
-      let c = n;
-      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-      CRC_TABLE[n] = c >>> 0;
-    }
+// Slice-by-8: 8 tables of 256 entries let the loop consume 8 bytes per step (T[0] is the
+// classic byte-at-a-time table; T[k][n] is the CRC of byte n followed by k zero bytes).
+let CRC_TABLES = null;
+function crcTables() {
+  const t = new Uint32Array(8 * 256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c >>> 0;
   }
+  for (let n = 0; n < 256; n++) {
+    for (let k = 1; k < 8; k++) t[k * 256 + n] = t[(t[(k - 1) * 256 + n] & 0xff)] ^ (t[(k - 1) * 256 + n] >>> 8);
+  }
+  return t;
+}
+
+export function crc32(bytes) {
+  const T = (CRC_TABLES ??= crcTables());
   let crc = 0xffffffff;
-  for (let i = 0; i < bytes.length; i++) crc = CRC_TABLE[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
+  let i = 0;
+  const end8 = bytes.length - (bytes.length & 7);
+  for (; i < end8; i += 8) {
+    const a = crc ^ (bytes[i] | (bytes[i + 1] << 8) | (bytes[i + 2] << 16) | (bytes[i + 3] << 24));
+    crc =
+      T[1792 + (a & 0xff)] ^ T[1536 + ((a >>> 8) & 0xff)] ^ T[1280 + ((a >>> 16) & 0xff)] ^ T[1024 + (a >>> 24)] ^
+      T[768 + bytes[i + 4]] ^ T[512 + bytes[i + 5]] ^ T[256 + bytes[i + 6]] ^ T[bytes[i + 7]];
+  }
+  for (; i < bytes.length; i++) crc = T[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
   return (crc ^ 0xffffffff) >>> 0;
 }
