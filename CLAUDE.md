@@ -10,9 +10,10 @@ npm パッケージ名: `gltf2usd-js`。
 
 ## 現在の状態（段階 1〜4 完了。要相談事項は「要相談」を参照）
 
-`src/` 13 ファイル。テスト GLB（`cube.glb`、`features.glb`、`animated.glb`、`skinned.glb`、外部ファイル付き `gltf/cube.gltf`）と
+`src/` 14 ファイル。テスト GLB（`cube.glb`、`features.glb`、`animated.glb`、`skinned.glb`、外部ファイル付き `gltf/cube.gltf`）と
 Khronos サンプル（BoxTextured / CesiumMilkTruck / DamagedHelmet / BoxAnimated / InterpolationTest / RiggedSimple / RiggedFigure /
-CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 の全 30 バリデータに通して error 0 を確認済み。
+CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版のある 16 モデルすべて）を OpenUSD 26.11 の
+全 30 バリデータに通して error 0 を確認済み。
 
 | ファイル | 役割 | 備考 |
 |---|---|---|
@@ -23,6 +24,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
 | `src/skin.js` | `planSkins()`, `buildSkeleton()`, `skinningPrimvars()` | glTF skin → SkelRoot / Skeleton / SkelAnimation、jointIndices / Weights |
 | `src/morph.js` | `addBlendShapes()`, `restWeights()` | morph target → BlendShape prim、skel:blendShapes |
 | `src/meshopt.js` | `decodeMeshopt(source, ext)` | EXT_meshopt_compression の ATTRIBUTES / TRIANGLES / INDICES と 3 フィルタ |
+| `src/draco.js` | `decodeDracoMesh(bytes, { maxValues })`, `DracoError` | KHR_draco_mesh_compression（Draco ビットストリーム 2.2 の三角形メッシュ）。設計判断 23 |
 | `src/math.js` | 4x4 行列（glTF 規約）、`decompose()`、`slerp()` | `composeTRS` もここ |
 | `src/names.js` | `sanitize()`, `uniqueName()` | prim 名・ジョイント名 |
 | `src/ir.js` | `Layer` / `Prim`（`attr()` / `rel()` / `child()`） | USD 側のプリム・属性ツリー。値の表現規約は冒頭コメント |
@@ -36,11 +38,13 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
 | `test/make-glb.js` | 上記を `test/*.glb` と `test/gltf/`（外部ファイル付き .gltf）に書き出す | |
 | `test/png.js` | テスト画像用の小さな PNG エンコーダ | |
 | `test/meshopt-vectors.js` | meshopt のテストベクトル（meshoptimizer のエンコーダで生成した入力とリファレンス出力） | 依存なしでデコーダを検証するため |
+| `test/draco-vectors.js` / `make-draco-vectors.js` | Draco のテストベクトル（draco3d 1.5.9 で圧縮した 7 本と draco3d の復元結果の CRC32）と、その生成スクリプト | 生成は `npm install --no-save draco3d@1.5.9` のうえ手で実行。`--compare N` でランダム比較 |
+| `test/draco.js` | Draco: ベクトルとの一致、壊れた入力が `DracoError` になること、glTF 側（accessor の充填・型変換・検証） | `npm test`（ブラウザでも動く） |
 | `test/run.js` | JS 側の単体テスト（prim 名、zip アライン検証） | `npm test` |
 | `test/validation.js` / `accessor.js` / `color.js` / `usdz.js` / `edge-cases.js` | 入力検証、行列 accessor、頂点カラー / アルファ、USDZ の上限、アニメーション / スキンの境界値 | `npm test`（`usdz.js` 以外はブラウザでも動く。`images.js` も） |
 | `test/images.js` | WebP 画像の扱い（同期版は警告、非同期版は `convertImage` で変換） | `npm test` |
 | `test/gltf-builder.js` | テスト用に glTF / GLB を組み立てる小さなヘルパ | |
-| `test/integration/` | Khronos glTF-Sample-Assets（コミット固定、SHA-256 照合）の 19 モデルで変換・zip・内容・OpenUSD 検証 | `npm run test:integration`（ネットワーク。`-- --offline` でキャッシュのみ） |
+| `test/integration/` | Khronos glTF-Sample-Assets（コミット固定、SHA-256 照合）の 22 モデルで変換・zip・内容・OpenUSD 検証 | `npm run test:integration`（ネットワーク。`-- --offline` でキャッシュのみ） |
 | `test/validate.py` | OpenUSD で開いてバリデータ実行 | `pip install usd-core` が必要 |
 | `demo/` | Web テストアプリ（`npm run demo` → `http://localhost:8080/demo/`） | 下記 |
 
@@ -55,6 +59,8 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
 - `usdz-reader.js`: zip の central directory を読む
 - `server.js`: 依存ゼロの静的サーバ
 - three.js（0.170.0）は import map で jsDelivr から読む。デモにだけ許される依存で、`src/` には入れない
+- 左の GLTFLoader には three.js の MeshoptDecoder と DRACOLoader（Google の WASM デコーダ、同じ three.js 0.170.0 の
+  `examples/jsm/libs/draco/gltf/`）を渡している。右（変換結果）は `src/meshopt.js` / `src/draco.js` を使うので、左右の比較が検証になる
 - **GLTFLoader の KHR_texture_transform は仕様とずれる**（S·R の順で合成するため、非一様 scale + rotation で崩れる）。
   `app.js` の `fixTextureTransforms()` で仕様どおりの行列に直してから左側に表示している
 - **新しい USD 機能を出力したら、`usd-preview.js` / `checks.js` もそれを読めるように更新する**
@@ -101,6 +107,8 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
   強さは glTF の lux / candela をそのまま。UsdLux は単位を明示していないので近似。range は警告。AR Quick Look はライトを無視する）
 - KHR_materials_unlit（近似: diffuseColor = 黒、baseColor → emissiveColor、`ior = 1` でフレネル反射を消す。他の PBR 入力は無視）
 - EXT_meshopt_compression（`src/meshopt.js`。全モード・全フィルタ。bufferView 単位でデコードしてキャッシュ）
+- KHR_draco_mesh_compression（`src/draco.js`。ビットストリーム 2.2 のシーケンシャル / エッジブレイカー（標準・valence）、全予測方式。
+  bufferView 単位でデコードしてキャッシュ。設計判断 23）
 - KHR_mesh_quantization（整数・正規化 accessor + ノード変換。gltf-transform で量子化した DamagedHelmet / CesiumMan を
   three.js と比較して一致を確認）
 - KHR_materials_emissive_strength（emissiveColor に乗算）、KHR_materials_ior（`inputs:ior`）、
@@ -119,8 +127,8 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
 - KHR_meshopt_compression（EXT_ 版とはバージョン・フィルタが違う。fallback buffer を読めないものとして扱い、該当メッシュをスキップして警告）
 - ZIP64（4 GiB を超える USDZ は `UsdzLimitError`）
 - KHR_materials_transmission / volume / specular / sheen など（警告）
-- KHR_draco_mesh_compression: 非圧縮の fallback があればそれを使う。なければそのプリミティブをスキップして警告
-- 読めないデータ（Draco の fallback なし、壊れた meshopt 列など）は `DataUnavailableError` になり、
+- Draco のビットストリーム 2.2 以外（KHR_draco_mesh_compression が 2.2 を規定しているので、glTF では出てこないはず）
+- 読めないデータ（デコードできない Draco で fallback がない、壊れた meshopt 列など）は `DataUnavailableError` になり、
   メッシュ / アニメーションのチャンネル / スキンの単位でスキップして警告（以前のように 0 埋めで壊れたメッシュは出さない）
 - POINTS / LINES プリミティブ（スキップして警告）
 - 2 本目以降のアニメーション（`options.animation` で 1 本選ぶ。警告あり）
@@ -261,6 +269,29 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest）を OpenUSD 26.11 �
    失敗した画像は警告して捨てる。EXT_texture_webp の「未対応」警告は、WebP の画像がすべて変換できたときだけ出さない。
    ユーザー提供の Fox_optimized.glb（gltf-transform、1024² の非可逆 WebP、PNG の代替なし）で、Chromium での変換結果が
    OpenUSD のバリデータで error 0、デモの左右が一致。KTX2（KHR_texture_basisu）はブラウザでもデコードできないので対象外。
+23. **Draco は自前のデコーダで読む（`src/draco.js`、issue #8 の案 2）。** KHR_draco_mesh_compression はビットストリーム 2.2 を規定するので
+   2.2 だけを読む（それ以外は `DracoError`）。Draco の仕様書（google/draco の docs/spec）を基にしたが、仕様書はリファレンスデコーダと
+   食い違う・足りない箇所がある（整数属性の `compressed` フラグと予測データの順序、PREDICTION_NONE でも値を読むこと、逆量子化は
+   `val * (range / max)`、八面体法線は `s * (2 / max) - 1` からの float32 計算、エッジブレイカーのコーナーテーブルと S シンボルの頂点統合、
+   属性の継ぎ目と走査、テクスチャ座標・法線予測の int64 演算）。そこはリファレンスデコーダ（C++、Apache 2.0）を翻訳して合わせた
+   （`THIRD_PARTY_NOTICES.md`、ファイル先頭に著作権表示）。float は `Math.fround` で 1 演算ずつ丸め、int64 は BigInt
+   （法線予測は 2^52 未満なら double の高速経路）。結果は draco3d 1.5.9（Google の WASM デコーダ、three.js の DRACOLoader と同じもの）と
+   バイト単位で一致: ランダムなメッシュ（穴・裏返り・溶接・UV の継ぎ目・閉じた球、全属性型、速度 0〜10、シーケンシャル / エッジブレイカー）
+   約 2,200 ケースと、Khronos glTF-Sample-Assets の glTF-Draco 版 16 モデルの全 253 プリミティブ（valence 36 本を含む）。
+   draco3d の JS エンコーダは valence と圧縮シーケンシャルインデックスを出せないので、valence は結合テスト（BrainStem-draco など）で、
+   圧縮インデックスはテスト専用の rANS エンコーダで書き直したストリーム（draco3d も同じメッシュに復元する）でベクトルにしている。
+   壊れた入力（全切り詰め・ビット反転 2.5 万通り）は必ず `DracoError` で止まり、ハングしない。`maxValues`（= `limits.maxAccessorValues`）で
+   インデックス数・属性値の数を確保前に制限する。速度は WASM の約 1/4（Khronos の Draco 16 モデル全体で 0.5 秒）。
+   glTF 側（`glb.js`）: 仕様どおり、拡張があれば accessor の bufferView（非圧縮の fallback）は無視して Draco のデータで埋める。Draco が
+   デコードできないときだけ fallback を使い、警告する（fallback もなければメッシュを警告付きでスキップ）。値は accessor の componentType へ
+   Draco の `ConvertComponentValue`（draco3d の GetAttributeDataArrayForAllPoints、three.js の DRACOLoader と同じ）で変換し、
+   そのあと accessor の normalized で正規化する。点数・成分数・インデックス数が accessor と合わない、ID が Draco のデータにない、
+   インデックスが componentType に収まらない場合は `GltfValidationError`（仕様の「accessor は復元データと一致しなければならない」）。
+   indices のない Draco プリミティブは Draco のインデックスを使う（Draco は点を並べ替えるので連番では描けない。three.js も同じ）。
+   validate.js では拡張のオブジェクト・bufferView・attributes（プリミティブの属性の部分集合、ID は非負整数）・mode（TRIANGLES /
+   TRIANGLE_STRIP）を検査し、indices のない Draco プリミティブには頂点数のモード規則を当てない。
+   非圧縮版と比べると、三角形数とプリムは一致し、バウンディングボックスの差は量子化の範囲（相対 3.4e-4 以下）。VirtualCity の
+   細長い橋（約 1,150 単位）だけ面積が数 % 違うが、draco3d の復元結果も同じで、元データの量子化が粗いため。
 
 ## OpenUSD バリデータに指摘されて直した点（再発注意）
 
@@ -279,7 +310,7 @@ node cli.js test/animated.glb /tmp/animated.usdz && python3 test/validate.py /tm
 node cli.js test/skinned.glb /tmp/skinned.usdz && python3 test/validate.py /tmp/skinned.usdz
 node cli.js test/features.glb /tmp/features.usdz && python3 test/validate.py /tmp/features.usdz
 node cli.js test/gltf/cube.gltf /tmp/cube-gltf.usdz && python3 test/validate.py /tmp/cube-gltf.usdz
-npm run test:integration                   # Khronos サンプル 19 モデル（初回はネットワーク）。OpenUSD 検証込み
+npm run test:integration                   # Khronos サンプル 22 モデル（初回はネットワーク）。OpenUSD 検証込み
 npm run demo                               # 見た目の確認: サンプルと fixtures の GLB を左右で比較
 ```
 
@@ -300,7 +331,6 @@ npm run demo                               # 見た目の確認: サンプルと
   特定のレンダラ（Hydra Storm / RealityKit など）に合わせた換算が要るか
 - **EXT_mesh_gpu_instancing の表現**: 今はインスタンスごとの instanceable reference に展開。数万個になる場合は
   UsdGeomPointInstancer の方がずっと小さいが、ビューア側の対応を確認してから切り替えたい
-- **Draco**: 非圧縮 fallback がなければスキップ。デコーダを自前で書くか（大きな作業）
 
 ## ロードマップと次のタスク
 
@@ -340,7 +370,7 @@ npm run demo                               # 見た目の確認: サンプルと
 ## npm 公開・README
 
 - パッケージ名 `gltf2usd-js`、MIT（著作権者 activeguild、`LICENSE`）。`package.json` の `files` で公開するのは `src/`・`cli.js`・
-  `README.md`・`README.ja.md`・`LICENSE` だけ（test / demo / CLAUDE.md は含めない）。`exports` は `.` と `./package.json` のみ。
+  `README.md`・`README.ja.md`・`LICENSE`・`THIRD_PARTY_NOTICES.md` だけ（test / demo / CLAUDE.md は含めない）。`exports` は `.` と `./package.json` のみ。
   bin は `glb2usd`（1 つだけなので `npx gltf2usd-js in.glb out.usdz` でも動く）。`prepublishOnly` で `npm test`。Node は 18 以上。
 - 公開前の確認: `npm pack --dry-run` で中身を見て、tarball を空のプロジェクトに入れて `import "gltf2usd-js"` と `npx glb2usd` を試す。
 - **公開は GitHub Actions（`.github/workflows/publish.yml`）。** `v<semver>` のタグを push すると、タグのバージョンを

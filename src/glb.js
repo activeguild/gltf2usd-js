@@ -1,5 +1,6 @@
 // GLB (glTF 2.0 binary) parser. Zero dependencies, works in browser and Node.
 import { decodeMeshopt } from "./meshopt.js";
+import { decodeDracoMesh, DracoError } from "./draco.js";
 import { GltfValidationError, COMPONENT_SIZE, TYPE_COUNT, elementLayout, resolveLimits, validateDocument } from "./validate.js";
 
 export { GltfValidationError };
@@ -126,6 +127,21 @@ export class GltfAsset {
     validateDocument(json, this.limits);
     this._buffers = (json.buffers || []).map((b, i) => this._loadBuffer(b, i));
     this._decodedViews = new Map(); // EXT_meshopt_compression results by bufferView index
+    this._dracoMeshes = new Map(); // KHR_draco_mesh_compression results (or errors) by bufferView index
+    // Accessors filled from Draco data: accessor index -> { bufferView, uniqueId } (uniqueId
+    // null for indices). The first primitive that names an accessor wins.
+    this._dracoAccessors = new Map();
+    for (const mesh of json.meshes || []) {
+      for (const p of mesh.primitives) {
+        const draco = p.extensions?.KHR_draco_mesh_compression;
+        if (!draco) continue;
+        const add = (accessor, uniqueId) => {
+          if (!this._dracoAccessors.has(accessor)) this._dracoAccessors.set(accessor, { bufferView: draco.bufferView, uniqueId });
+        };
+        if (p.indices !== undefined) add(p.indices, null);
+        for (const [name, id] of Object.entries(draco.attributes)) add(p.attributes[name], id);
+      }
+    }
     // Sparse indices must be strictly increasing and below count; check them up front
     // (validate.js only sees the JSON). Unreadable views are checked when decoded instead.
     (json.accessors || []).forEach((acc, i) => {
@@ -230,7 +246,13 @@ export class GltfAsset {
     // Component byte offsets within an element; matrix columns are 4-byte aligned.
     const layout = elementLayout(acc.componentType, acc.type);
 
-    if (acc.bufferView !== undefined) {
+    // KHR_draco_mesh_compression: the accessor's bufferView (an uncompressed fallback, if
+    // any) is ignored when the Draco data can be decoded, and used when it cannot.
+    const draco = this._dracoAccessors.get(index);
+    const decoded = draco && this._dracoMesh(draco.bufferView, acc.bufferView === undefined);
+    if (decoded) {
+      this._fillFromDraco(index, acc, draco.uniqueId, decoded, data, numComponents, info);
+    } else if (acc.bufferView !== undefined) {
       const bv = this.json.bufferViews[acc.bufferView];
       const view = this._viewData(acc.bufferView);
       const base = view.byteOffset + (acc.byteOffset || 0);
@@ -249,6 +271,81 @@ export class GltfAsset {
 
     if (acc.sparse) this._applySparse(index, acc, data, numComponents, info, layout);
     return { data, count, numComponents };
+  }
+
+  /**
+   * The decoded Draco mesh in a bufferView (cached). When it cannot be decoded: throws
+   * DataUnavailableError if `required`, else returns null (the caller uses the fallback).
+   */
+  _dracoMesh(bufferView, required) {
+    let entry = this._dracoMeshes.get(bufferView);
+    if (!entry) {
+      try {
+        entry = { mesh: decodeDracoMesh(this._viewData(bufferView), { maxValues: this.limits.maxAccessorValues }) };
+      } catch (e) {
+        // RangeError: an allocation the input asked for failed.
+        if (!(e instanceof DracoError || e instanceof DataUnavailableError || e instanceof RangeError)) throw e;
+        entry = { error: `KHR_draco_mesh_compression data (bufferView ${bufferView}) could not be decoded: ${e.message}` };
+      }
+      this._dracoMeshes.set(bufferView, entry);
+    }
+    if (entry.mesh) return entry.mesh;
+    if (required) throw new DataUnavailableError(entry.error);
+    return null;
+  }
+
+  /** Why a primitive's KHR_draco_mesh_compression data cannot be decoded, or null. */
+  dracoError(prim) {
+    const draco = prim.extensions?.KHR_draco_mesh_compression;
+    if (!draco) return null;
+    this._dracoMesh(draco.bufferView, false);
+    return this._dracoMeshes.get(draco.bufferView).error ?? null;
+  }
+
+  /** Decoded indices of a Draco primitive that has no indices accessor, or null. */
+  dracoIndices(prim) {
+    const draco = prim.extensions?.KHR_draco_mesh_compression;
+    if (!draco || prim.indices !== undefined) return null;
+    const mesh = this._dracoMesh(draco.bufferView, false);
+    if (!mesh) return null;
+    const vertexCount = this.json.accessors[prim.attributes.POSITION].count;
+    for (const i of mesh.indices) {
+      if (i >= vertexCount) throw new GltfValidationError(`KHR_draco_mesh_compression (bufferView ${draco.bufferView}): index ${i} is not below the vertex count ${vertexCount}`);
+    }
+    return Array.from(mesh.indices);
+  }
+
+  /**
+   * Fill accessor `index` from a decoded Draco mesh: its indices (uniqueId null) or the
+   * attribute with that unique id. Values are converted to the accessor's componentType the
+   * way Draco's GetAttributeDataArrayForAllPoints does (as three.js's DRACOLoader requests
+   * them), then normalized if the accessor says so.
+   */
+  _fillFromDraco(index, acc, uniqueId, mesh, data, numComponents, info) {
+    const where = `accessor ${index} (KHR_draco_mesh_compression)`;
+    if (uniqueId === null) {
+      if (numComponents !== 1 || mesh.indices.length !== acc.count) {
+        throw new GltfValidationError(`${where}: the Draco data has ${mesh.indices.length} indices, the accessor has count ${acc.count}`);
+      }
+      const max = COMPONENT_MAX[acc.componentType];
+      for (let i = 0; i < acc.count; i++) {
+        if (mesh.indices[i] > max) throw new GltfValidationError(`${where}: Draco index ${mesh.indices[i]} does not fit componentType ${acc.componentType}`);
+        data[i] = mesh.indices[i];
+      }
+      return;
+    }
+    const att = mesh.attributes.find((a) => a.uniqueId === uniqueId);
+    if (!att) throw new GltfValidationError(`${where}: the Draco data has no attribute with id ${uniqueId}`);
+    if (mesh.numPoints !== acc.count || att.numComponents !== numComponents) {
+      throw new GltfValidationError(`${where}: the Draco attribute ${uniqueId} has ${mesh.numPoints} × ${att.numComponents} values, the accessor ${acc.count} × ${numComponents}`);
+    }
+    const convert = dracoConverter(att, acc.componentType);
+    for (let i = 0; i < data.length; i++) {
+      let v = convert(att.values[i]);
+      if (v === null) throw new DataUnavailableError(`${where}: Draco attribute ${uniqueId} value ${att.values[i]} does not fit componentType ${acc.componentType}`);
+      if (acc.normalized) v = info.norm(v);
+      data[i] = v;
+    }
   }
 
   _applySparse(index, acc, data, numComponents, info, layout) {
@@ -322,6 +419,43 @@ function sniffImageType(bytes) {
   if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return "image/png";
   if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
   return undefined;
+}
+
+const COMPONENT_MIN = { 5120: -128, 5121: 0, 5122: -32768, 5123: 0, 5125: 0 };
+const COMPONENT_MAX = { 5120: 127, 5121: 255, 5122: 32767, 5123: 65535, 5125: 4294967295 };
+// Largest value of each Draco integer data type (DT_INT8 = 1 ... DT_UINT64 = 8, DT_BOOL = 11).
+const DRACO_INT_MAX = { 1: 127, 2: 255, 3: 32767, 4: 65535, 5: 2147483647, 6: 4294967295, 7: 2 ** 63 - 1, 8: 2 ** 64 - 1, 11: 1 };
+
+/**
+ * Converts one decoded Draco value to an accessor componentType like Draco's
+ * ConvertComponentValue (used by GetAttributeDataArrayForAllPoints); null when it does not fit.
+ */
+function dracoConverter(att, componentType) {
+  const floatIn = att.dataType === 9 || att.dataType === 10;
+  if (componentType === 5126) {
+    if (att.normalized && !floatIn) {
+      const max = Math.fround(DRACO_INT_MAX[att.dataType]);
+      return (v) => Math.fround(Math.fround(Number(v)) / max);
+    }
+    return (v) => Math.fround(Number(v));
+  }
+  const min = COMPONENT_MIN[componentType];
+  const max = COMPONENT_MAX[componentType];
+  if (floatIn) {
+    return (v) => {
+      if (!Number.isFinite(v) || v < min || v >= max) return null;
+      if (!att.normalized) return Math.trunc(v);
+      if (v > 1 || v < 0) return null;
+      return Math.floor(v * max + 0.5);
+    };
+  }
+  const signedIn = att.dataType === 1 || att.dataType === 3 || att.dataType === 5 || att.dataType === 7;
+  const lo = signedIn ? min : 0;
+  const isBool = att.dataType === 11;
+  return (v) => {
+    const n = Number(v);
+    return !isBool && (n < lo || n > max) ? null : n;
+  };
 }
 
 function componentReader(dv, componentType) {

@@ -163,9 +163,9 @@ try {
 | `KHR_lights_punctual` | ✅ UsdLux（強さはそのまま書く。AR Quick Look はライトを無視する） |
 | `KHR_mesh_quantization` | ✅ |
 | `EXT_meshopt_compression` | ✅ デコーダを内蔵 |
+| `KHR_draco_mesh_compression` | ✅ デコーダを内蔵（Draco ビットストリーム 2.2。Google のデコーダと同じ結果） |
 | `EXT_mesh_gpu_instancing` | ✅ インスタンスごとに instanceable な参照（`_` で始まる独自属性は警告を出して無視） |
 | `EXT_texture_webp` | ✅ 非同期 API のみ（PNG / JPEG に変換） |
-| `KHR_draco_mesh_compression` | ⚠️ ファイルに非圧縮の代替データがあればそれを使う。なければそのプリミティブを警告付きで飛ばす |
 | `KHR_meshopt_compression` | ❌ 圧縮されたデータは警告付きで飛ばす |
 
 ## 制限事項
@@ -219,7 +219,7 @@ GLB をページにドロップすると、元の glTF（three.js）と変換し
 
 ```bash
 npm test                        # 単体テスト（ネットワーク不要）
-npm run test:integration        # Khronos glTF-Sample-Assets の 19 モデル（初回だけダウンロード。コミットと SHA-256 で固定）
+npm run test:integration        # Khronos glTF-Sample-Assets の 22 モデル（初回だけダウンロード。コミットと SHA-256 で固定）
 pip install usd-core            # 任意。結合テストと test/validate.py で OpenUSD のバリデータを使えるようになる
 python3 test/validate.py model.usdz
 ```
@@ -240,5 +240,7 @@ git push origin v0.2.0
 ## ライセンス
 
 [MIT](LICENSE) © activeguild
+
+Draco のデコーダ（`src/draco.js`）の一部は Google のリファレンスデコーダを翻訳したもので、Apache License 2.0 に従います。[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) を参照してください。
 
 出力は普通の USD です。「OpenUSD」「Pixar」の名前は、フォーマットと参照用のバリデータを指すためだけに使っています。このプロジェクトはそれらとは関係ありません。

@@ -43,6 +43,7 @@ const SUPPORTED_EXTENSIONS = new Set([
   "EXT_mesh_gpu_instancing",
   "KHR_materials_variants",
   "EXT_meshopt_compression",
+  "KHR_draco_mesh_compression",
 ]);
 
 /** USD primvar name for glTF TEXCOORD_n: st, st1, st2, ... (strings are primvar names as-is) */
@@ -528,13 +529,15 @@ function identityIfTrivial(m) {
 
 /**
  * Build one Mesh prim, or skip it (with a warning) when its data cannot be read:
- * Draco-compressed without an uncompressed fallback, or meshopt-compressed views.
+ * Draco or meshopt data that cannot be decoded, with no uncompressed fallback.
  */
 function buildMeshPrim(ctx, parent, prim, name, skel = null, gltfMesh = null) {
-  const positionAccessor = ctx.json.accessors?.[prim.attributes?.POSITION];
-  if (prim.extensions?.KHR_draco_mesh_compression && positionAccessor && positionAccessor.bufferView === undefined) {
-    ctx.warn(`Mesh "${name}" is Draco-compressed (KHR_draco_mesh_compression) with no uncompressed fallback; skipped`);
-    return;
+  // KHR_draco_mesh_compression: accessors are filled from the decoded Draco data (glb.js).
+  // Undecodable data falls back to the uncompressed accessors if the file has them; without
+  // them reading the accessors throws DataUnavailableError and the mesh is skipped below.
+  const dracoError = ctx.asset.dracoError(prim);
+  if (dracoError && ctx.json.accessors[prim.attributes.POSITION].bufferView !== undefined) {
+    ctx.warn(`Mesh "${name}": ${dracoError}; the uncompressed fallback is used`);
   }
   const children = parent.children.length;
   const shapes = skel?.shapes.length;
@@ -816,7 +819,9 @@ function buildTriangleIndices(ctx, prim, mode, vertexCount, where) {
     // not the component type's reserved maximum, and below the vertex count.
     checkIndexValues(idx, ctx.json.accessors[prim.indices].componentType, vertexCount, `${where}: indices (accessor ${prim.indices})`);
   } else {
-    idx = Array.from({ length: vertexCount }, (_, i) => i);
+    // A Draco primitive without an indices accessor still has decoded indices (Draco
+    // reorders the points); three.js uses them too.
+    idx = ctx.asset.dracoIndices(prim) ?? Array.from({ length: vertexCount }, (_, i) => i);
   }
   if (mode === MODE_TRIANGLES) return idx;
   const out = [];

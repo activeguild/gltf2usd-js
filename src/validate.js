@@ -136,6 +136,7 @@ function checkAttribute(rules, name, acc, label, quantization, fail, custom = nu
   }
 }
 const MODE_TRIANGLES = 4;
+const MODE_TRIANGLE_STRIP = 5;
 // Element counts per primitive mode (glTF 2.0 § 3.7.2.1), for the indices or, without
 // indices, the vertices: at least `min`, and a multiple of `multiple`.
 const MODE_RULES = [
@@ -352,6 +353,20 @@ export function validateDocument(json, limits) {
       if (attributes.POSITION === undefined) fail(`${where}: has no POSITION attribute`);
       const mode = p.mode ?? MODE_TRIANGLES;
       if (!(Number.isInteger(mode) && mode >= 0 && mode <= 6)) fail(`${where}: mode ${JSON.stringify(p.mode)} is not a glTF primitive mode (0..6)`);
+      // KHR_draco_mesh_compression: the compressed bufferView, and attribute ids for a subset
+      // of the primitive's attributes; only TRIANGLES / TRIANGLE_STRIP.
+      const draco = object(p, "extensions", where).KHR_draco_mesh_compression;
+      if (draco !== undefined) {
+        const dwhere = `${where} KHR_draco_mesh_compression`;
+        if (!isObject(draco)) fail(`${dwhere} must be an object`);
+        ref(draco.bufferView, bufferViews, "bufferView", dwhere);
+        if (draco.attributes === undefined) fail(`${dwhere}: attributes is required`);
+        for (const [name, id] of Object.entries(object(draco, "attributes", dwhere))) {
+          if (!isIndex(id)) fail(`${dwhere}: attribute ${name} id must be a non-negative integer (got ${JSON.stringify(id)})`);
+          if (attributes[name] === undefined) fail(`${dwhere}: attribute ${name} is not an attribute of the primitive`);
+        }
+        if (mode !== MODE_TRIANGLES && mode !== MODE_TRIANGLE_STRIP) fail(`${dwhere}: mode must be TRIANGLES or TRIANGLE_STRIP (got ${mode})`);
+      }
       // Every attribute, standard or custom, has one element per vertex (POSITION's count; § 3.7.2.1).
       const position = attributes.POSITION !== undefined ? accessors[attributes.POSITION] : null;
       const vertexCount = position?.count;
@@ -370,7 +385,7 @@ export function validateDocument(json, limits) {
         if (idx.normalized) fail(`${label} must not be normalized`);
         const problem = modeCountProblem(mode, idx.count);
         if (problem) fail(`${label}: ${problem} indices`);
-      } else if (position) {
+      } else if (position && draco === undefined) { // a Draco primitive draws its decoded indices
         const problem = modeCountProblem(mode, vertexCount);
         if (problem) fail(`${where}: without indices, POSITION (accessor ${attributes.POSITION}): ${problem} vertices`);
       }
