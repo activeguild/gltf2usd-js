@@ -155,7 +155,7 @@ const usdz: Uint8Array = toUsdz(bytes, options);
 - A mesh shared by several nodes becomes an instanceable reference to a single prototype
 
 **Materials** (UsdPreviewSurface)
-- Base color, metallic-roughness, normal, occlusion and emissive (factor and texture each), alphaMode BLEND / MASK, double-sided
+- Base color, metallic-roughness, normal, occlusion and emissive (factor and texture each), alphaMode BLEND / MASK, double-sided (see [Limitations](#limitations) for Quick Look)
 - PNG and JPEG textures, sampler wrap modes, multiple UV sets
 - Vertex alpha (`COLOR_0` VEC4) with BLEND / MASK materials. Quick Look cannot read per-vertex opacity directly, so it is written as an alpha ramp texture with a dedicated UV set.
 - Transmissive glass (`KHR_materials_transmission`) becomes translucent: opacity = `max(1 − transmissionFactor × (1 − metallicFactor), 0.2)` (metal does not transmit, as in glTF).
@@ -191,7 +191,8 @@ const usdz: Uint8Array = toUsdz(bytes, options);
 - **Transmission:** UsdPreviewSurface has no transmission or refraction, so transmissive materials are drawn as translucent instead. Fully transmissive glass keeps an opacity of 0.2 so that it stays visible. As in glTF, only the non-metallic part transmits (a fully metallic material stays opaque); the metallic channel of `metallicRoughnessTexture` is not taken into account (`metallicFactor` only). `transmissionTexture` is ignored, and so is transmission on MASK and unlit materials.
 - **Primitive modes:** POINTS and LINES primitives are skipped with a warning.
 - **Animations:** Only one animation is converted, chosen with `options.animation`.
-- **Not supported:** cameras, KHR_materials_volume / specular / sheen, KTX2 textures, USDC (binary) output, ZIP64.
+- **Scenes:** Only the default scene (`scene`, or the first one) is converted; a warning lists the others.
+- **Not supported:** cameras, KHR_materials_volume / specular / sheen, the clearcoat normal texture, morph target tangents, KTX2 textures, USDC (binary) output, ZIP64.
 
 Everything that is dropped is reported through `onWarning`.
 
@@ -199,6 +200,7 @@ Everything that is dropped is reported through `onWarning`.
 
 - **Tested viewers:** iOS AR Quick Look and macOS Finder Quick Look play the output, including skins, node animation and vertex alpha. The layout follows Apple's own samples: the default prim is the `SkelRoot`, and each `SkelAnimation` sits under its `Skeleton`.
 - **xformOp animation:** AR Quick Look does not play time-sampled xformOps. That is why node animation is written as a skeleton by default.
+- **Zero scale:** Quick Look stops skinning a whole skeleton when a joint's scale is exactly 0, for example a flipbook that scales each frame from 0 to 1. All frames then show at once (or none do). OpenUSD and the demo play these files correctly.
 - **Reality Converter:** It accepts only packages whose root layer is USDC. USDC output is not implemented yet.
 
 ## Input validation
