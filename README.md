@@ -134,7 +134,7 @@ try {
 
 ### Lower-level exports
 
-`parseGltf`, `parseGLB`, `GltfAsset` (parsing and accessor decoding), `gltfToStage` (glTF → an in-memory USD layer), `writeUsda` (layer → text), `packUsdz` (files → USDZ), `browserImageConverter`, `DEFAULT_LIMITS`, `DataUnavailableError`.
+`parseGltf`, `parseGLB`, `GltfAsset` (parsing and accessor decoding), `gltfToStage` (glTF → an in-memory USD layer), `gltfToUsda` (a `GltfAsset` → `{ usda, files }`, i.e. `gltfToStage` + `writeUsda`; unlike `toUsda` it takes a parsed asset), `writeUsda` (layer → text), `packUsdz` (files → USDZ), `browserImageConverter`, `DEFAULT_LIMITS`, `DataUnavailableError`.
 
 The type definitions also export the option and result types: `ConvertOptions`, `AsyncConvertOptions`, `StageOptions`, `GltfInput`, `ResourceSource`, `ImageConverter`, `Limits`, `UsdaResult`, `PackagedFile`, and others.
 

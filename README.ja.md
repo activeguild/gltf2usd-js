@@ -134,7 +134,7 @@ try {
 
 ### 下位レベルの関数
 
-`parseGltf`、`parseGLB`、`GltfAsset`（パースと accessor のデコード）、`gltfToStage`（glTF → メモリ上の USD レイヤー）、`writeUsda`（レイヤー → テキスト）、`packUsdz`（ファイル群 → USDZ）、`browserImageConverter`、`DEFAULT_LIMITS`、`DataUnavailableError`。
+`parseGltf`、`parseGLB`、`GltfAsset`（パースと accessor のデコード）、`gltfToStage`（glTF → メモリ上の USD レイヤー）、`gltfToUsda`（`GltfAsset` → `{ usda, files }`。`gltfToStage` + `writeUsda` で、`toUsda` と違いパース済みの asset を受け取る）、`writeUsda`（レイヤー → テキスト）、`packUsdz`（ファイル群 → USDZ）、`browserImageConverter`、`DEFAULT_LIMITS`、`DataUnavailableError`。
 
 型定義からは、オプションと戻り値の型（`ConvertOptions`、`AsyncConvertOptions`、`StageOptions`、`GltfInput`、`ResourceSource`、`ImageConverter`、`Limits`、`UsdaResult`、`PackagedFile` など）も import できます。
 
