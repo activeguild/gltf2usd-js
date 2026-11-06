@@ -28,9 +28,10 @@ function samplesOf(usda, attr) {
 
 // ---------- Animation ----------
 
-/** Triangle node translated by one sampler (times / VEC3 values), optionally 2 clips. */
-function animated(times, values, { interpolation = "LINEAR", second = false } = {}) {
+/** Triangle node translated (or `path`) by one sampler (times / VEC3 values), optionally 2 clips. */
+function animated(times, values, { interpolation = "LINEAR", second = false, path = "translation", node = {} } = {}) {
   const { json, bin: triBin } = triangleDoc();
+  Object.assign(json.nodes[0], node);
   const { bin: animBin, views } = packParts([new Float32Array(times), new Float32Array(values)]);
   const bin = new Uint8Array(triBin.length + animBin.length);
   bin.set(triBin); bin.set(animBin, triBin.length);
@@ -40,11 +41,30 @@ function animated(times, values, { interpolation = "LINEAR", second = false } = 
     { bufferView: 2, componentType: 5126, count: times.length, type: "SCALAR" },
     { bufferView: 3, componentType: 5126, count: values.length / 3, type: "VEC3" },
   );
-  const clip = (name) => ({ name, samplers: [{ input: 2, output: 3, interpolation }], channels: [{ sampler: 0, target: { node: 0, path: "translation" } }] });
+  const clip = (name) => ({ name, samplers: [{ input: 2, output: 3, interpolation }], channels: [{ sampler: 0, target: { node: 0, path } }] });
   json.animations = second ? [clip("First"), clip("Second")] : [clip("Move")];
   return makeGlb(json, bin);
 }
 const xform = { animationMode: "xform" };
+
+{
+  // Flipbook: a node at rest scale 0 that an animation scales to 1 (skeleton mode). Its rest
+  // world matrix is singular, so it cannot be the rigid bind (inverse(bind) · geomBind would
+  // collapse every point and the frame would never appear); the bind is the identity instead.
+  const zero = "( (0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 1) )";
+  const identity = "( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1) )";
+  const { usda, warnings } = run(animated([0, 1], [0, 0, 0, 1, 1, 1], { interpolation: "STEP", path: "scale", node: { scale: [0, 0, 0] } }));
+  assert(usda.includes(`uniform matrix4d[] bindTransforms = [${identity}]`), `singular rest: identity bind: ${usda.match(/bindTransforms = .*/)?.[0]}`);
+  assert(usda.includes(`matrix4d primvars:skel:geomBindTransform = ${identity}`), `singular rest: identity geomBind: ${usda.match(/geomBindTransform = .*/)?.[0]}`);
+  assert(usda.includes(`uniform matrix4d[] restTransforms = [${zero}]`), "singular rest: the rest pose stays scale 0 (hidden until played)");
+  assert(!warnings.length, `singular rest warnings: ${warnings}`);
+}
+{
+  // A regular animated node keeps its rest world matrix as bind and geomBind.
+  const { usda } = run(animated([0, 1], [0, 0, 0, 1, 0, 0], { node: { scale: [2, 2, 2] } }));
+  const m = "( (2, 0, 0, 0), (0, 2, 0, 0), (0, 0, 2, 0), (0, 0, 0, 1) )";
+  assert(usda.includes(`bindTransforms = [${m}]`) && usda.includes(`geomBindTransform = ${m}`), "regular rest: world matrix bind");
+}
 
 {
   // One keyframe: a single time sample, start = end.

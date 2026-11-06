@@ -158,7 +158,7 @@ const usdz: Uint8Array = toUsdz(bytes, options);
 - ベースカラー、メタリック・ラフネス、法線、オクルージョン、エミッシブ（それぞれ係数とテクスチャ）。alphaMode の BLEND / MASK、両面表示
 - PNG / JPEG のテクスチャ、サンプラーのラップモード、複数の UV セット
 - BLEND / MASK のマテリアルでの頂点アルファ（`COLOR_0` の VEC4）。Quick Look は頂点ごとの不透明度を直接読めないので、アルファのランプ画像と専用の UV セットで表す
-- 透過するガラス（`KHR_materials_transmission`）は半透明にする: opacity = `max(1 − transmissionFactor, 0.2)`
+- 透過するガラス（`KHR_materials_transmission`）は半透明にする: opacity = `max(1 − transmissionFactor × (1 − metallicFactor), 0.2)`（glTF と同じく金属は透過しない）
 
 **アニメーション・スキン・モーフターゲット**（UsdSkel）
 - スキンは Skeleton / SkelAnimation / ジョイントのウェイトになる（JOINTS_n / WEIGHTS_n はいくつでも）
@@ -173,7 +173,7 @@ const usdz: Uint8Array = toUsdz(bytes, options);
 | `KHR_texture_transform` | ✅ `UsdTransform2d` |
 | `KHR_materials_emissive_strength`、`KHR_materials_ior`、`KHR_materials_clearcoat` | ✅ |
 | `KHR_materials_unlit` | ✅ 近似（ディフューズを黒にして発光で表す） |
-| `KHR_materials_transmission` | ✅ opacity で近似: `max(1 − transmissionFactor, 0.2)`（屈折なし。下限 0.2 は透明なガラスが消えないため）。`MASK` では無視、`transmissionTexture` は無視 |
+| `KHR_materials_transmission` | ✅ opacity で近似: `max(1 − transmissionFactor × (1 − metallicFactor), 0.2)`（屈折なし。下限 0.2 は透明なガラスが消えないため）。`MASK` では無視、`transmissionTexture` と metallic のテクスチャは無視 |
 | `KHR_materials_variants` | ✅ variantSet `materialVariant` |
 | `KHR_lights_punctual` | ✅ UsdLux（強さはそのまま書く。AR Quick Look はライトを無視する） |
 | `KHR_mesh_quantization` | ✅ |
@@ -189,7 +189,7 @@ const usdz: Uint8Array = toUsdz(bytes, options);
 - **頂点アルファとベースカラーテクスチャ:** 頂点アルファとベースカラーテクスチャのアルファは掛け合わせず、テクスチャのアルファを使います。UsdPreviewSurface では 2 つの入力を掛け合わせられないためです。
 - **プリミティブのモード:** POINTS / LINES のプリミティブは、警告を出して飛ばします。
 - **アニメーション:** 変換するのは 1 本だけで、`options.animation` で選びます。
-- **透過:** UsdPreviewSurface には透過・屈折がないので、透過するマテリアルは半透明で表します。完全に透過するガラスも、見えなくならないよう opacity 0.2 を残します。`transmissionTexture` と、MASK・unlit のマテリアルの透過は無視します。
+- **透過:** UsdPreviewSurface には透過・屈折がないので、透過するマテリアルは半透明で表します。完全に透過するガラスも、見えなくならないよう opacity 0.2 を残します。glTF と同じく透過するのは金属でない部分だけで、完全に金属のマテリアルは不透明のままです（`metallicRoughnessTexture` の metallic チャンネルは見ず、`metallicFactor` だけを使います）。`transmissionTexture` と、MASK・unlit のマテリアルの透過は無視します。
 - **未対応:** カメラ、KHR_materials_volume / specular / sheen、KTX2 のテクスチャ、USDC（バイナリ）出力、ZIP64。
 
 捨てた情報は、すべて `onWarning` で知らせます。

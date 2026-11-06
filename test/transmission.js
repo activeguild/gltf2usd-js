@@ -24,10 +24,11 @@ function doc(material, { texture = false, used = ["KHR_materials_transmission"] 
     ],
     bufferViews: views,
     buffers: [{ byteLength: bin.length }],
-    materials: [{ name: "Glass", ...material }],
+    // Dielectric unless the case says otherwise (glTF's default metallicFactor is 1, which transmits nothing).
+    materials: [{ name: "Glass", ...material, pbrMetallicRoughness: { metallicFactor: 0, ...(material.pbrMetallicRoughness || {}) } }],
   };
   if (texture) {
-    json.materials[0].pbrMetallicRoughness = { ...(material.pbrMetallicRoughness || {}), baseColorTexture: { index: 0 } };
+    json.materials[0].pbrMetallicRoughness = { ...json.materials[0].pbrMetallicRoughness, baseColorTexture: { index: 0 } };
     json.textures = [{ source: 0 }];
     json.images = [{ bufferView: 2, mimeType: "image/png" }];
   }
@@ -84,6 +85,55 @@ assert(doc({ alphaMode: "BLEND", pbrMetallicRoughness: { baseColorFactor: [0.8, 
   assert(warnings.some((w) => w.includes("ignored on an unlit material")), "unlit warning");
 }
 assert(doc(tr(1, { transmissionTexture: { index: 0 } })).warnings.some((w) => w.includes("transmissionTexture")), "transmissionTexture is reported");
+
+// transmissionTexture is only reported when the approximation is applied (factor 0 / MASK / unlit: irrelevant).
+assert(!doc(tr(0, { transmissionTexture: { index: 0 } })).warnings.some((w) => w.includes("transmissionTexture")), "no transmissionTexture warning for factor 0");
+{
+  const { warnings } = doc({ alphaMode: "MASK", ...tr(1, { transmissionTexture: { index: 0 } }) });
+  assert(!warnings.some((w) => w.includes("transmissionTexture")), "no transmissionTexture warning with MASK");
+}
+
+// Metallic: glTF transmits through the dielectric part only → transmitted = factor × (1 − metallic).
+{
+  const { mat, warnings } = doc({ pbrMetallicRoughness: { metallicFactor: 1 }, ...tr(1) });
+  assert(!mat.includes("inputs:opacity"), "fully metallic: opaque");
+  assert(!warnings.some((w) => w.includes("approximated")), "fully metallic: no approximation warning");
+}
+{
+  // metallicFactor omitted = 1 (glTF default).
+  const m = tr(1);
+  m.pbrMetallicRoughness = { metallicFactor: undefined };
+  assert(!doc(m).mat.includes("inputs:opacity"), "default metallic 1: opaque");
+}
+assert(doc({ pbrMetallicRoughness: { metallicFactor: 0.5 }, ...tr(0.8) }).mat.includes("float inputs:opacity = 0.6"),
+  "metallic 0.5, transmission 0.8 → opacity 1 − 0.4");
+assert(doc({ pbrMetallicRoughness: { metallicFactor: 0.01 }, ...tr(1) }).mat.includes("float inputs:opacity = 0.2"),
+  "nearly dielectric glass keeps the floor");
+assert(doc({ pbrMetallicRoughness: { metallicFactor: 0, metallicRoughnessTexture: { index: 0 } }, ...tr(1) }, { texture: true })
+  .warnings.some((w) => w.includes("metallicRoughnessTexture is not taken into account")), "metallic texture is reported");
+
+// BLEND + COLOR_0 alpha: primvars:displayOpacity carries the same transmission factor as the material.
+{
+  const parts = [new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]), new Float32Array([1, 1, 1, 1, 1, 1, 1, 0.5, 1, 1, 1, 1])];
+  const { bin, views } = packParts(parts);
+  const json = {
+    asset: { version: "2.0" },
+    extensionsUsed: ["KHR_materials_transmission"],
+    scenes: [{ nodes: [0] }],
+    nodes: [{ mesh: 0 }],
+    meshes: [{ primitives: [{ attributes: { POSITION: 0, COLOR_0: 1 }, material: 0 }] }],
+    accessors: [
+      { bufferView: 0, componentType: 5126, count: 3, type: "VEC3", min: [0, 0, 0], max: [1, 1, 0] },
+      { bufferView: 1, componentType: 5126, count: 3, type: "VEC4" },
+    ],
+    bufferViews: views,
+    buffers: [{ byteLength: bin.length }],
+    materials: [{ name: "Glass", alphaMode: "BLEND", pbrMetallicRoughness: { metallicFactor: 0 }, ...tr(0.5) }],
+  };
+  const { usda } = toUsda(makeGlb(json, bin));
+  assert(usda.includes("float[] primvars:displayOpacity = [0.5, 0.25, 0.5]"), `displayOpacity × transmission: ${usda.match(/primvars:displayOpacity = [^\n]*/)}`);
+  assert(usda.includes("float4 inputs:scale = (1, 1, 1, 0.5)"), "vertex alpha ramp scale × transmission");
+}
 
 if (failures) {
   console.error(`${failures} failure(s)`);

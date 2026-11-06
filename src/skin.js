@@ -171,7 +171,15 @@ export function planRigidAnimation(ctx, sceneNodes, exclude) {
   };
   roots.forEach(collect);
   const { joints, tokens, prefix } = jointHierarchy(ctx, jointList, parent, world, "Animation");
-  const bind = joints.map((j) => world(j));
+  // A joint whose rest world matrix is singular (e.g. a flipbook frame at rest scale 0) cannot
+  // be the bind: inverse(bind) does not exist and geomBind would collapse every point, so the
+  // mesh would never appear. Any bind works for a rigid binding as long as geomBind is the same
+  // (inverse(bind) · geomBind = identity), so use the identity there; the rest pose
+  // (restTransforms) keeps the singular matrix, so the mesh stays hidden at rest.
+  const bind = joints.map((j) => {
+    const m = world(j);
+    return isIdentity(multiply(m, invert(m)), 1e-6) ? m : [...IDENTITY];
+  });
   const users = joints.filter((j) => json.nodes[j].mesh !== undefined);
   const name = uniqueName("Animated", ctx.skinNames);
   return { index: -1, name, joints, tokens, remap: null, bind, prefix, users, rigid: true, roots: new Set(roots) };
