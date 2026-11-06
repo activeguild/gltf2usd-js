@@ -172,6 +172,7 @@ const usdz: Uint8Array = toUsdz(bytes, options);
 | `KHR_texture_transform` | ✅ `UsdTransform2d` |
 | `KHR_materials_emissive_strength`, `KHR_materials_ior`, `KHR_materials_clearcoat` | ✅ |
 | `KHR_materials_unlit` | ✅ approximated (black diffuse + emission) |
+| `KHR_materials_transmission` | ✅ approximated as opacity: `max(1 − transmissionFactor, 0.2)` (no refraction; the 0.2 floor keeps clear glass visible). Ignored with `MASK`; `transmissionTexture` is ignored |
 | `KHR_materials_variants` | ✅ a `materialVariant` variantSet |
 | `KHR_lights_punctual` | ✅ UsdLux (intensities copied as-is; AR Quick Look ignores lights) |
 | `KHR_mesh_quantization` | ✅ |
@@ -187,7 +188,7 @@ const usdz: Uint8Array = toUsdz(bytes, options);
 - **Vertex alpha and base color textures:** Vertex alpha is not combined with a base color texture's alpha; the texture alpha is used. UsdPreviewSurface cannot multiply two inputs.
 - **Primitive modes:** POINTS and LINES primitives are skipped with a warning.
 - **Animations:** Only one animation is converted, chosen with `options.animation`.
-- **Not supported:** cameras, KHR_materials_transmission / volume / specular / sheen, KTX2 textures, USDC (binary) output, ZIP64.
+- **Not supported:** cameras, KHR_materials_volume / specular / sheen, KTX2 textures, USDC (binary) output, ZIP64.
 
 Everything that is dropped is reported through `onWarning`.
 

@@ -172,6 +172,7 @@ const usdz: Uint8Array = toUsdz(bytes, options);
 | `KHR_texture_transform` | ✅ `UsdTransform2d` |
 | `KHR_materials_emissive_strength`、`KHR_materials_ior`、`KHR_materials_clearcoat` | ✅ |
 | `KHR_materials_unlit` | ✅ 近似（ディフューズを黒にして発光で表す） |
+| `KHR_materials_transmission` | ✅ opacity で近似: `max(1 − transmissionFactor, 0.2)`（屈折なし。下限 0.2 は透明なガラスが消えないため）。`MASK` では無視、`transmissionTexture` は無視 |
 | `KHR_materials_variants` | ✅ variantSet `materialVariant` |
 | `KHR_lights_punctual` | ✅ UsdLux（強さはそのまま書く。AR Quick Look はライトを無視する） |
 | `KHR_mesh_quantization` | ✅ |
@@ -187,7 +188,7 @@ const usdz: Uint8Array = toUsdz(bytes, options);
 - **頂点アルファとベースカラーテクスチャ:** 頂点アルファとベースカラーテクスチャのアルファは掛け合わせず、テクスチャのアルファを使います。UsdPreviewSurface では 2 つの入力を掛け合わせられないためです。
 - **プリミティブのモード:** POINTS / LINES のプリミティブは、警告を出して飛ばします。
 - **アニメーション:** 変換するのは 1 本だけで、`options.animation` で選びます。
-- **未対応:** カメラ、KHR_materials_transmission / volume / specular / sheen、KTX2 のテクスチャ、USDC（バイナリ）出力、ZIP64。
+- **未対応:** カメラ、KHR_materials_volume / specular / sheen、KTX2 のテクスチャ、USDC（バイナリ）出力、ZIP64。
 
 捨てた情報は、すべて `onWarning` で知らせます。
 

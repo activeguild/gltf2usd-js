@@ -81,13 +81,15 @@ assert(matE.includes("float inputs:clearcoat = 0.8"), "clearcoat factor");
 assert(matE.includes("float inputs:clearcoatRoughness.connect = </Root/Materials/E/Texture_clearcoatRoughness.outputs:g>"), "clearcoat roughness texture (G)");
 assert(matE.includes("float4 inputs:scale = (0.5, 0.5, 0.5, 1)"), "clearcoat roughness factor as texture scale");
 assert(!matD.includes("inputs:ior") && !matD.includes("clearcoat"), "no ior / clearcoat without the extensions");
-assert(warnings.some((w) => w.includes("KHR_materials_transmission")), "transmission is reported as unsupported");
-for (const e of ["emissive_strength", "KHR_materials_ior", "KHR_materials_clearcoat"]) {
+assert(matE.includes("float inputs:opacity = 0.5"), "transmission 0.5 → opacity 0.5 (OPAQUE becomes translucent)");
+assert(!matD.includes("inputs:opacity"), "no opacity without transmission");
+assert(warnings.some((w) => w.includes("KHR_materials_transmission is approximated as opacity")), "transmission approximation is reported");
+for (const e of ["emissive_strength", "KHR_materials_ior", "KHR_materials_clearcoat", "KHR_materials_transmission is not supported"]) {
   assert(!warnings.some((w) => w.includes(e)), `no warning for supported ${e}`);
 }
 
 // Warnings: unsupported extension, skipped LINES primitive; each reported once.
-assert(warnings.some((w) => w.includes("KHR_materials_transmission")), "warns about unsupported extension");
+assert(warnings.some((w) => w.includes("KHR_materials_sheen is not supported")), "warns about unsupported extension");
 // KHR_lights_punctual → UsdLux
 const lightBlock = (node) => f.usda.slice(f.usda.indexOf(`def Xform "${node}"`), f.usda.indexOf("}", f.usda.indexOf(`def Xform "${node}"`) + 200));
 assert(lightBlock("SunNode").includes('def DistantLight "Sun"') && lightBlock("SunNode").includes("float inputs:intensity = 2"), "directional → DistantLight");
