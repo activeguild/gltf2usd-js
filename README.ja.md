@@ -155,7 +155,7 @@ const usdz: Uint8Array = toUsdz(bytes, options);
 - 複数のノードで共有されるメッシュは、1 つのプロトタイプへの instanceable な参照になる
 
 **マテリアル**（UsdPreviewSurface）
-- ベースカラー、メタリック・ラフネス、法線、オクルージョン、エミッシブ（それぞれ係数とテクスチャ）。alphaMode の BLEND / MASK、両面表示
+- ベースカラー、メタリック・ラフネス、法線、オクルージョン、エミッシブ（それぞれ係数とテクスチャ）。alphaMode の BLEND / MASK、両面表示（Quick Look での扱いは[制限事項](#制限事項)を参照）
 - PNG / JPEG のテクスチャ、サンプラーのラップモード、複数の UV セット
 - BLEND / MASK のマテリアルでの頂点アルファ（`COLOR_0` の VEC4）。Quick Look は頂点ごとの不透明度を直接読めないので、アルファのランプ画像と専用の UV セットで表す
 - 透過するガラス（`KHR_materials_transmission`）は半透明にする: opacity = `max(1 − transmissionFactor × (1 − metallicFactor), 0.2)`（glTF と同じく金属は透過しない）
@@ -190,8 +190,9 @@ const usdz: Uint8Array = toUsdz(bytes, options);
 - **両面表示のマテリアル:** `doubleSided` は USD の `doubleSided` として書きますが、Quick Look と AR Quick Look はこれを無視して表面だけを描くため、裏から見える面は消えます（警告を出します）。
 - **プリミティブのモード:** POINTS / LINES のプリミティブは、警告を出して飛ばします。
 - **アニメーション:** 変換するのは 1 本だけで、`options.animation` で選びます。
+- **シーン:** 変換するのは既定のシーン（`scene`、なければ最初のシーン）だけです。ほかのシーンがあれば警告を出します。
 - **透過:** UsdPreviewSurface には透過・屈折がないので、透過するマテリアルは半透明で表します。完全に透過するガラスも、見えなくならないよう opacity 0.2 を残します。glTF と同じく透過するのは金属でない部分だけで、完全に金属のマテリアルは不透明のままです（`metallicRoughnessTexture` の metallic チャンネルは見ず、`metallicFactor` だけを使います）。`transmissionTexture` と、MASK・unlit のマテリアルの透過は無視します。
-- **未対応:** カメラ、KHR_materials_volume / specular / sheen、KTX2 のテクスチャ、USDC（バイナリ）出力、ZIP64。
+- **未対応:** カメラ、KHR_materials_volume / specular / sheen、clearcoat の法線テクスチャ、モーフターゲットの接線、KTX2 のテクスチャ、USDC（バイナリ）出力、ZIP64。
 
 捨てた情報は、すべて `onWarning` で知らせます。
 
@@ -199,6 +200,7 @@ const usdz: Uint8Array = toUsdz(bytes, options);
 
 - **確認済みのビューア:** iOS の AR Quick Look と macOS の Finder の Quick Look で、スキン・ノードアニメーション・頂点アルファを含めて再生できます。構成は Apple の見本に合わせています（defaultPrim が `SkelRoot` で、`SkelAnimation` は `Skeleton` の子）。
 - **xformOp のアニメーション:** AR Quick Look は、時間サンプル付きの xformOp を再生しません。ノードアニメーションを既定でスケルトンとして書くのはこのためです。
+- **スケール 0:** Quick Look は、スケールがちょうど 0 のジョイントがあると、そのスケルトン全体のスキニングをやめます（例: 各コマを 0 から 1 に拡大して見せるパラパラ漫画）。その場合、全部のコマが同時に出るか、どれも出ません。OpenUSD とデモでは正しく再生されます。
 - **Reality Converter:** ルートレイヤーが USDC のパッケージしか受け付けません。USDC の出力はまだ実装していません。
 
 ## 入力の検証
