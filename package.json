@@ -1,6 +1,6 @@
 {
   "name": "gltf2usd-js",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Dependency-free glTF / GLB to USDZ / USDA converter for browsers and Node.js — works with Apple AR Quick Look",
   "keywords": [
     "gltf",
