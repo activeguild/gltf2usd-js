@@ -9,9 +9,9 @@ glTF 2.0（`.glb` / `.gltf`）を USDZ / USDA に変換するライブラリで�
 - 出力は OpenUSD 26.11 のバリデータでエラー 0 を確認しています。入力は変換前に glTF 2.0 の仕様に沿って検査し、不正なファイルはわかりやすいエラーで止めます。
 
 ```js
-import { glbToUsdz } from "gltf2usd-js";
+import { toUsdz } from "gltf2usd-js";
 
-const usdz = glbToUsdz(glbBytes); // Uint8Array。そのまま保存したり AR Quick Look で開いたりできる
+const usdz = toUsdz(glbBytes); // Uint8Array。そのまま保存したり AR Quick Look で開いたりできる
 ```
 
 ## 目次
@@ -43,17 +43,17 @@ TypeScript の型定義（`src/index.d.ts`）を同梱しています。`@types`
 
 ```js
 import { readFileSync, writeFileSync } from "node:fs";
-import { glbToUsdz } from "gltf2usd-js";
+import { toUsdz } from "gltf2usd-js";
 
-writeFileSync("model.usdz", glbToUsdz(readFileSync("model.glb")));
+writeFileSync("model.usdz", toUsdz(readFileSync("model.glb")));
 ```
 
 外部の `.bin` や画像を参照する `.gltf` の場合は、それらのファイルを `resources` で渡します。
 
 ```js
-import { glbToUsdz } from "gltf2usd-js";
+import { toUsdz } from "gltf2usd-js";
 
-const usdz = glbToUsdz(readFileSync("scene.gltf", "utf8"), {
+const usdz = toUsdz(readFileSync("scene.gltf", "utf8"), {
   resources: {
     "scene.bin": readFileSync("scene.bin"),
     "textures/base.png": readFileSync("textures/base.png"),
@@ -66,16 +66,16 @@ const usdz = glbToUsdz(readFileSync("scene.gltf", "utf8"), {
 ### ブラウザ
 
 ```js
-import { glbToUsdzAsync } from "gltf2usd-js";
+import { toUsdzAsync } from "gltf2usd-js";
 
 const file = input.files[0];                        // <input type="file">
-const usdz = await glbToUsdzAsync(await file.arrayBuffer());
+const usdz = await toUsdzAsync(await file.arrayBuffer());
 const url = URL.createObjectURL(new Blob([usdz], { type: "model/vnd.usdz+zip" }));
 
 // iOS の AR Quick Look: <a rel="ar" href={url}><img ...></a>
 ```
 
-USDZ には PNG と JPEG しか入れられないので、非同期版の関数は WebP のテクスチャ（`EXT_texture_webp`）も、ブラウザ自身の画像デコーダで PNG / JPEG に変換します。同期版（`glbToUsdz` / `glbToUsda`）はどこでも同じように動きますが、WebP のテクスチャは警告を出して捨てます。
+USDZ には PNG と JPEG しか入れられないので、非同期版の関数は WebP のテクスチャ（`EXT_texture_webp`）も、ブラウザ自身の画像デコーダで PNG / JPEG に変換します。同期版（`toUsdz` / `toUsda`）はどこでも同じように動きますが、WebP のテクスチャは警告を出して捨てます。
 
 ### CLI
 
@@ -91,10 +91,12 @@ npx gltf2usd-js model.glb model.usdz
 
 | 関数 | 戻り値 | |
 |---|---|---|
-| `glbToUsdz(input, options?)` | `Uint8Array` | USDZ パッケージ |
-| `glbToUsda(input, options?)` | `{ usda: string, files: { name, bytes }[] }` | USDA のテキストと、それが参照するテクスチャ |
-| `glbToUsdzAsync(input, options?)` | `Promise<Uint8Array>` | `glbToUsdz` と同じだが、先に WebP のテクスチャを変換する |
-| `glbToUsdaAsync(input, options?)` | `Promise<{ usda, files }>` | `glbToUsda` と同じだが、先に WebP のテクスチャを変換する |
+| `toUsdz(input, options?)` | `Uint8Array` | USDZ パッケージ |
+| `toUsda(input, options?)` | `{ usda: string, files: { name, bytes }[] }` | USDA のテキストと、それが参照するテクスチャ |
+| `toUsdzAsync(input, options?)` | `Promise<Uint8Array>` | `toUsdz` と同じだが、先に WebP のテクスチャを変換する |
+| `toUsdaAsync(input, options?)` | `Promise<{ usda, files }>` | `toUsda` と同じだが、先に WebP のテクスチャを変換する |
+
+元の名前 `glbToUsdz` / `glbToUsda` / `glbToUsdzAsync` / `glbToUsdaAsync` も同じ関数で、引き続き使えます（名前に glb とありますが `.gltf` も受け付けます）。
 
 `input` には次のどれでも渡せます：GLB / `.gltf` のバイト列（`ArrayBuffer` / `Uint8Array`）、`.gltf` の JSON テキスト、パース済みの glTF オブジェクト。
 
@@ -120,10 +122,10 @@ npx gltf2usd-js model.glb model.usdz
 | `UsdzLimitError` | 出力が普通の zip（ZIP64 でないもの）に収まらないとき。ファイルや全体が 4 GiB 以上、エントリが 65535 個より多い、エントリ名が 65535 バイトより長い、のいずれか |
 
 ```js
-import { glbToUsdz, GltfValidationError } from "gltf2usd-js";
+import { toUsdz, GltfValidationError } from "gltf2usd-js";
 
 try {
-  glbToUsdz(bytes, { onWarning: (m) => console.warn(m) });
+  toUsdz(bytes, { onWarning: (m) => console.warn(m) });
 } catch (e) {
   if (e instanceof GltfValidationError) console.error("glTF として不正:", e.message);
   else throw e;
@@ -137,10 +139,10 @@ try {
 型定義からは、オプションと戻り値の型（`ConvertOptions`、`AsyncConvertOptions`、`StageOptions`、`GltfInput`、`ResourceSource`、`ImageConverter`、`Limits`、`UsdaResult`、`PackagedFile` など）も import できます。
 
 ```ts
-import { glbToUsdz, type ConvertOptions } from "gltf2usd-js";
+import { toUsdz, type ConvertOptions } from "gltf2usd-js";
 
 const options: ConvertOptions = { animationMode: "skeleton", onWarning: console.warn };
-const usdz: Uint8Array = glbToUsdz(bytes, options);
+const usdz: Uint8Array = toUsdz(bytes, options);
 ```
 
 ## 対応している glTF の機能

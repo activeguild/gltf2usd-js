@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
-import { glbToUsda, glbToUsdz } from "../src/index.js";
+import { glbToUsda, glbToUsdz, toUsda, toUsdz } from "../src/index.js";
+import * as api from "../src/index.js";
 import { buildCubeGltf } from "./cube-glb.js";
 import { decodeMeshopt } from "../src/meshopt.js";
 import { VECTORS, CUBE_VIEWS } from "./meshopt-vectors.js";
@@ -373,6 +374,12 @@ assert(f.usda.includes('def Mesh "CubeC"') && f.usda.includes('def Xform "CubeC_
 const cubeWarnings = [];
 glbToUsda(glb, { onWarning: (m) => cubeWarnings.push(m) });
 assert(cubeWarnings.length === 0, `cube has no warnings: ${cubeWarnings}`);
+
+// The glb* names are the same functions as the format-neutral ones (issue #3).
+assert(api.glbToUsda === api.toUsda && api.glbToUsdz === api.toUsdz, "glbToUsda / glbToUsdz are aliases");
+assert(api.glbToUsdaAsync === api.toUsdaAsync && api.glbToUsdzAsync === api.toUsdzAsync, "glbTo*Async are aliases");
+assert(toUsda(glb).usda === usda, "toUsda output");
+assert(toUsdz(glb).length === usdz.length, "toUsdz output");
 
 // src/index.d.ts declares exactly the runtime exports of src/index.js (types: npm run test:types).
 {

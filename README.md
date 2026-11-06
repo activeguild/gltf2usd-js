@@ -9,9 +9,9 @@ Convert glTF 2.0 (`.glb` / `.gltf`) to USDZ or USDA, in the browser or in Node.j
 - Each output is checked with the OpenUSD 26.11 validators (0 errors). Before converting, the input is validated against the glTF 2.0 specification, and invalid files fail with a clear error.
 
 ```js
-import { glbToUsdz } from "gltf2usd-js";
+import { toUsdz } from "gltf2usd-js";
 
-const usdz = glbToUsdz(glbBytes); // Uint8Array, ready to save or to open in AR Quick Look
+const usdz = toUsdz(glbBytes); // Uint8Array, ready to save or to open in AR Quick Look
 ```
 
 ## Contents
@@ -43,17 +43,17 @@ TypeScript type definitions are included (`src/index.d.ts`); no `@types` package
 
 ```js
 import { readFileSync, writeFileSync } from "node:fs";
-import { glbToUsdz } from "gltf2usd-js";
+import { toUsdz } from "gltf2usd-js";
 
-writeFileSync("model.usdz", glbToUsdz(readFileSync("model.glb")));
+writeFileSync("model.usdz", toUsdz(readFileSync("model.glb")));
 ```
 
 A `.gltf` file with external `.bin` and image files: pass the files in `resources`.
 
 ```js
-import { glbToUsdz } from "gltf2usd-js";
+import { toUsdz } from "gltf2usd-js";
 
-const usdz = glbToUsdz(readFileSync("scene.gltf", "utf8"), {
+const usdz = toUsdz(readFileSync("scene.gltf", "utf8"), {
   resources: {
     "scene.bin": readFileSync("scene.bin"),
     "textures/base.png": readFileSync("textures/base.png"),
@@ -66,16 +66,16 @@ const usdz = glbToUsdz(readFileSync("scene.gltf", "utf8"), {
 ### Browser
 
 ```js
-import { glbToUsdzAsync } from "gltf2usd-js";
+import { toUsdzAsync } from "gltf2usd-js";
 
 const file = input.files[0];                        // <input type="file">
-const usdz = await glbToUsdzAsync(await file.arrayBuffer());
+const usdz = await toUsdzAsync(await file.arrayBuffer());
 const url = URL.createObjectURL(new Blob([usdz], { type: "model/vnd.usdz+zip" }));
 
 // AR Quick Look on iOS: <a rel="ar" href={url}><img ...></a>
 ```
 
-The async functions also convert WebP textures (`EXT_texture_webp`) to PNG or JPEG with the browser's own image decoder, because USDZ only holds PNG and JPEG. The synchronous functions (`glbToUsdz`, `glbToUsda`) work the same everywhere, but they drop WebP textures with a warning.
+The async functions also convert WebP textures (`EXT_texture_webp`) to PNG or JPEG with the browser's own image decoder, because USDZ only holds PNG and JPEG. The synchronous functions (`toUsdz`, `toUsda`) work the same everywhere, but they drop WebP textures with a warning.
 
 ### CLI
 
@@ -91,10 +91,12 @@ Write `model.usda` as the output to get USDA text instead. For `.gltf` input, th
 
 | Function | Returns | |
 |---|---|---|
-| `glbToUsdz(input, options?)` | `Uint8Array` | USDZ package |
-| `glbToUsda(input, options?)` | `{ usda: string, files: { name, bytes }[] }` | USDA text plus the textures it references |
-| `glbToUsdzAsync(input, options?)` | `Promise<Uint8Array>` | Like `glbToUsdz`, but converts WebP textures first |
-| `glbToUsdaAsync(input, options?)` | `Promise<{ usda, files }>` | Like `glbToUsda`, but converts WebP textures first |
+| `toUsdz(input, options?)` | `Uint8Array` | USDZ package |
+| `toUsda(input, options?)` | `{ usda: string, files: { name, bytes }[] }` | USDA text plus the textures it references |
+| `toUsdzAsync(input, options?)` | `Promise<Uint8Array>` | Like `toUsdz`, but converts WebP textures first |
+| `toUsdaAsync(input, options?)` | `Promise<{ usda, files }>` | Like `toUsda`, but converts WebP textures first |
+
+The original names `glbToUsdz`, `glbToUsda`, `glbToUsdzAsync` and `glbToUsdaAsync` are the same functions and remain supported. Despite the name, they accept `.gltf` too.
 
 `input` can be any of these: GLB or `.gltf` bytes (`ArrayBuffer` / `Uint8Array`), `.gltf` JSON text, or an already parsed glTF object.
 
@@ -120,10 +122,10 @@ Write `model.usda` as the output to get USDA text instead. For `.gltf` input, th
 | `UsdzLimitError` | The output does not fit a classic (non-ZIP64) zip: a file or the archive is 4 GiB or larger, there are more than 65535 entries, or an entry name is longer than 65535 bytes. |
 
 ```js
-import { glbToUsdz, GltfValidationError } from "gltf2usd-js";
+import { toUsdz, GltfValidationError } from "gltf2usd-js";
 
 try {
-  glbToUsdz(bytes, { onWarning: (m) => console.warn(m) });
+  toUsdz(bytes, { onWarning: (m) => console.warn(m) });
 } catch (e) {
   if (e instanceof GltfValidationError) console.error("Invalid glTF:", e.message);
   else throw e;
@@ -137,10 +139,10 @@ try {
 The type definitions also export the option and result types: `ConvertOptions`, `AsyncConvertOptions`, `StageOptions`, `GltfInput`, `ResourceSource`, `ImageConverter`, `Limits`, `UsdaResult`, `PackagedFile`, and others.
 
 ```ts
-import { glbToUsdz, type ConvertOptions } from "gltf2usd-js";
+import { toUsdz, type ConvertOptions } from "gltf2usd-js";
 
 const options: ConvertOptions = { animationMode: "skeleton", onWarning: console.warn };
-const usdz: Uint8Array = glbToUsdz(bytes, options);
+const usdz: Uint8Array = toUsdz(bytes, options);
 ```
 
 ## Supported glTF features

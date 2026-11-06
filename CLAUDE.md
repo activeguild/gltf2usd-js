@@ -33,7 +33,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
 | `src/png.js` | `encodeGrayAlphaPng()` | 変換器が自分で作るテクスチャ（頂点アルファのランプ）用の小さな PNG 書き出し |
 | `src/usdz.js` | `packUsdz(entries)` → `Uint8Array`、`planLayout()`、`UsdzLimitError` | stored-only zip、64 バイトアライン、CRC32 自前。ZIP の上限とエントリ名を書く前に検査 |
 | `src/index.d.ts` | 公開 API の型定義（手書き） | `src/index.js` の export を変えたら必ず合わせる。export 名の一致は `test/run.js`、型は `npm run test:types`（`test/types.ts`） |
-| `src/index.js`| `glbToUsda()`, `glbToUsdz()`, `gltfToUsda()`, `glbToUsdaAsync()`, `glbToUsdzAsync()` | 公開 API。名前は glb だが `.gltf` も受け付ける。Async 版は WebP などの画像を変換してから変換する |
+| `src/index.js`| `toUsda()`, `toUsdz()`, `toUsdaAsync()`, `toUsdzAsync()`, `gltfToUsda()` | 公開 API。GLB と `.gltf` を受け付ける。旧名 `glbToUsda` などは同じ関数の別名（設計判断 24）。Async 版は WebP などの画像を変換してから変換する |
 | `cli.js`      | `node cli.js in.glb\|in.gltf out.usdz\|out.usda`（`--help` / `--version`） | `.gltf` の外部ファイルは同じフォルダ以下からのみ読む。npm の bin は `glb2usd` |
 | `test/cube-glb.js` | テスト用 GLB をメモリ上で生成（Node / ブラウザ共用） | `buildCubeGlb()`（段階 1）、`buildFeatureGlb()`（段階 2）、`buildAnimatedGlb()`（段階 3）、`buildSkinnedGlb()`（段階 4）、`buildCubeGltf()` |
 | `test/make-glb.js` | 上記を `test/*.glb` と `test/gltf/`（外部ファイル付き .gltf）に書き出す | |
@@ -297,6 +297,11 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
    TRIANGLE_STRIP）を検査し、indices のない Draco プリミティブには頂点数のモード規則を当てない。
    非圧縮版と比べると、三角形数とプリムは一致し、バウンディングボックスの差は量子化の範囲（相対 3.4e-4 以下）。VirtualCity の
    細長い橋（約 1,150 単位）だけ面積が数 % 違うが、draco3d の復元結果も同じで、元データの量子化が粗いため。
+24. **公開関数名は形式に依存しない `toUsda` / `toUsdz` / `toUsdaAsync` / `toUsdzAsync`（issue #3 の案 2）。** `.gltf` も受け付けるようになり
+   `glbTo*` が実態に合わなくなったため。旧名 `glbToUsda` / `glbToUsdz` / `glbToUsdaAsync` / `glbToUsdzAsync` は同じ関数オブジェクトの別名として
+   残す（`export { toUsda as glbToUsda, ... }`。破壊的変更なし、非推奨にもしない）。`gltfToUsdz` にしなかったのは、既存の `gltfToUsda` が
+   `GltfAsset` を受け取る下位 API で、入力の型が違う関数が同じ接頭辞で並ぶと紛らわしいから。README・CLI・デモは新しい名前を使う。
+   別名であることは `test/run.js` で確認している。
 
 ## OpenUSD バリデータに指摘されて直した点（再発注意）
 
@@ -327,7 +332,6 @@ npm run demo                               # 見た目の確認: サンプルと
 ## 要相談（ユーザー判断待ち）
 
 - **KHR_materials_transmission**: UsdPreviewSurface に対応入力がない。現状は警告のみ。`opacity = 1 - transmission` で近似するか
-- **公開関数名**: `glbToUsda` / `glbToUsdz` は `.gltf` も受け付けるようになった。改名や別名を足すか
 - **複数アニメーション**: 現状は 1 本（`options.animation`）。`variantSet` で切替にするか、別ノードを動かすクリップは統合するか
   （例: Khronos の InterpolationTest は 9 クリップがそれぞれ別のキューブを動かすので、統合すれば全部入る。Fox は Survey / Walk / Run）
 - **CUBICSPLINE のベイク間隔**: 24fps で最大 3e-3 の誤差。もっと細かくするか

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
-import { glbToUsda, glbToUsdz } from "./src/index.js";
+import { toUsda, toUsdz } from "./src/index.js";
 
 const USAGE = `usage: glb2usd <in.glb|in.gltf> <out.usdz|out.usda>
 
@@ -41,7 +41,7 @@ const options = { resources, onWarning: (msg) => console.warn(`warning: ${msg}`)
 const data = readFileSync(input);
 let out;
 try {
-  out = output.endsWith(".usda") ? glbToUsda(data, options).usda : glbToUsdz(data, options);
+  out = output.endsWith(".usda") ? toUsda(data, options).usda : toUsdz(data, options);
 } catch (e) {
   // Invalid input / limits: a one-line message; anything else is a bug, so keep the stack.
   if (e.name === "GltfValidationError" || e.name === "UsdzLimitError") {
