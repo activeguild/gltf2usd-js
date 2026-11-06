@@ -195,6 +195,10 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
    Apple の見本（toy_drummer / hummingbird）もスケルトンのみ。usdzconvert の `bindRigidDeformation` と同じ方式
    （ただし usdzconvert 自身はノードアニメーションを xformOp で書いている）。OpenUSD 上はどちらも正しく評価される。
    three.js と OpenUSD の頂点比較で animated.glb / BoxAnimated / CesiumMilkTruck / InterpolationTest が一致（CUBICSPLINE 以外 1e-5 以内）。
+   静止時のワールド行列が特異なジョイント（静止 scale 0 から拡大して見せるパラパラ漫画など）は、bindTransforms と geomBindTransform を
+   単位行列にする（剛体バインドは inverse(bind) · geomBind = 単位 なら何でもよい）。行列のままだと geomBind で全頂点が 1 点に潰れ、
+   inverse(bind) もないので、アニメーションで拡大しても表示されなかった（ユーザー提供の flipbook_scale_sample.glb。デモの右側も同じ）。
+   restTransforms は scale 0 のままなので、再生前は非表示。特異かどうかは `W · invert(W)` が単位行列か（`planRigidAnimation()`）で判定。
 17. **スケルトンがあれば `/Root` 自体を SkelRoot にする。** 確認ビューアは **Mac の Finder の Quick Look（スペースキー）**。
    SkelRoot を `/Root`（Xform）の下に入れ子にした出力は USDA / USDC とも再生されず、defaultPrim が SkelRoot の構成だけ再生された
    （USDA でも再生される＝形式は無関係）。各スケルトンの入れ物は Xform、SkelAnimation は Skeleton の子、剛体バインドの
