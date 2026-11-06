@@ -19,6 +19,7 @@ import { evaluateAnimation, TIME_CODES_PER_SECOND } from "./animation.js";
 import { planSkins, buildSkeleton, skinningPrimvars, NO_JOINTS, planRigidAnimation, rigidPrimvars } from "./skin.js";
 import { addBlendShapes, meshHasTargets, restWeights } from "./morph.js";
 import { encodeGrayAlphaPng } from "./png.js";
+import { imageHasAlpha } from "./images.js";
 
 const MODE_NAMES = ["POINTS", "LINES", "LINE_LOOP", "LINE_STRIP", "TRIANGLES", "TRIANGLE_STRIP", "TRIANGLE_FAN"];
 const MODE_TRIANGLES = 4;
@@ -83,11 +84,12 @@ export function gltfToStage(asset, options = {}) {
     usedFileNames: new Set(),
     // Image index → { bytes, mimeType } replacing images USDZ cannot hold (toUsdzAsync).
     imageOverrides: options.imageOverrides ?? new Map(),
+    imageAlpha: new Map(), // image index → whether it can carry alpha (textureHasAlpha)
     warn: makeWarn(options.onWarning),
     meshPrimPaths: new Map(), // "mesh:primitive" → USD paths of its Mesh prims
   };
   reportUnsupported(ctx);
-  Object.assign(ctx, planVertexAlpha(ctx.json));
+  Object.assign(ctx, planVertexAlpha(ctx));
   ctx.animation = evaluateAnimation(ctx, options.animation ?? 0);
 
   const layer = new Layer({
@@ -667,7 +669,12 @@ function buildMeshPrimData(ctx, parent, prim, name, skel, gltfMesh) {
     // Variant-mapped primitives get their binding from the variantSet only: a binding
     // authored here (a local opinion) would be stronger than any variant's.
     if (!variantMapped) mesh.rel("material:binding", `/Root/Materials/${uniqueMaterialName(ctx, prim.material)}`);
-    if (ctx.json.materials[prim.material].doubleSided) mesh.attr("bool", "doubleSided", true, { uniform: true });
+    if (ctx.json.materials[prim.material].doubleSided) {
+      mesh.attr("bool", "doubleSided", true, { uniform: true });
+      // Quick Look / AR Quick Look draw front faces only, whatever doubleSided says (tested on
+      // device: Khronos MeshoptCubeTest's label boards face away and vanish). Same text → one warning.
+      ctx.warn("Double-sided materials are written as USD doubleSided, which Quick Look / AR Quick Look ignore (back faces are not drawn)");
+    }
   }
 }
 
@@ -719,10 +726,12 @@ const usesAlpha = (mat) => mat?.alphaMode === "BLEND" || mat?.alphaMode === "MAS
  * primvar vertexAlphaUV (u = COLOR_0.a at a texel center, interpolated across faces like
  * the vertex color), scaled by baseColorFactor.a. UsdPreviewSurface cannot multiply two
  * textures, so with a baseColorTexture the texture alpha is used and the vertex alpha
- * is not (warning).
+ * is not (warning). A base color texture without an alpha channel (JPEG, PNG without
+ * alpha or tRNS) has alpha 1 in glTF, so such materials use the ramp like untextured ones.
  * @returns {{ vertexAlphaMaterials: Set<number>, vertexAlphaTextured: Set<number> }}
  */
-function planVertexAlpha(json) {
+function planVertexAlpha(ctx) {
+  const json = ctx.json;
   const vertexAlphaMaterials = new Set();
   const vertexAlphaTextured = new Set();
   for (const mesh of json.meshes || []) {
@@ -732,11 +741,28 @@ function planVertexAlpha(json) {
       for (const m of primitiveMaterials(prim)) {
         const mat = json.materials?.[m];
         if (!usesAlpha(mat)) continue;
-        (mat.pbrMetallicRoughness?.baseColorTexture ? vertexAlphaTextured : vertexAlphaMaterials).add(m);
+        const texInfo = mat.pbrMetallicRoughness?.baseColorTexture;
+        (texInfo && textureHasAlpha(ctx, texInfo) ? vertexAlphaTextured : vertexAlphaMaterials).add(m);
       }
     }
   }
   return { vertexAlphaMaterials, vertexAlphaTextured };
+}
+
+/**
+ * Whether the image behind a textureInfo can carry alpha (see imageHasAlpha). Resolves the
+ * image like textureFile, without warnings; a texture that cannot be resolved counts as
+ * having alpha (textureFile then drops it and the material uses its constant opacity).
+ */
+function textureHasAlpha(ctx, texInfo) {
+  const tex = ctx.json.textures?.[texInfo?.index];
+  const source = tex?.source ?? tex?.extensions?.EXT_texture_webp?.source;
+  if (source === undefined || !ctx.json.images?.[source]) return true;
+  if (!ctx.imageAlpha.has(source)) {
+    const img = ctx.imageOverrides.get(source) ?? ctx.asset.imageBytes(source);
+    ctx.imageAlpha.set(source, !img || imageHasAlpha(img.bytes));
+  }
+  return ctx.imageAlpha.get(source);
 }
 
 /**
@@ -928,7 +954,11 @@ function buildMaterial(ctx, scope, mat, index) {
       surface.attr("float", "inputs:opacity", alpha);
     }
   };
+  // Opacity with a base color texture: its alpha. Without an alpha channel glTF reads 1, but
+  // Quick Look reads the texture's `a` as 0 (the material disappears under MASK / BLEND),
+  // so such a texture leaves the opacity to the factor (and the vertex alpha ramp).
   const textureOpacity = () => {
+    if (!textureHasAlpha(ctx, pbr.baseColorTexture)) return constantOpacity();
     if (alphaMode === "OPAQUE") {
       if (seeThrough < 1) surface.attr("float", "inputs:opacity", seeThrough);
       return;

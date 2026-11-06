@@ -186,7 +186,8 @@ const usdz: Uint8Array = toUsdz(bytes, options);
 ## Limitations
 
 - **Vertex color RGB and materials:** On a mesh that has a material, the vertex color RGB is written as `displayColor` but is not multiplied into the material.
-- **Vertex alpha and base color textures:** Vertex alpha is not combined with a base color texture's alpha; the texture alpha is used. UsdPreviewSurface cannot multiply two inputs.
+- **Vertex alpha and base color textures:** Vertex alpha is not combined with a base color texture's alpha; the texture alpha is used. UsdPreviewSurface cannot multiply two inputs. A base color texture without an alpha channel (JPEG, or PNG without alpha or `tRNS`) has alpha 1 in glTF, so then the opacity comes from `baseColorFactor` and the vertex alpha instead of the texture.
+- **Double-sided materials:** `doubleSided` is written as USD `doubleSided`, but Quick Look and AR Quick Look ignore it and draw front faces only, so surfaces seen from behind disappear there (a warning is reported).
 - **Transmission:** UsdPreviewSurface has no transmission or refraction, so transmissive materials are drawn as translucent instead. Fully transmissive glass keeps an opacity of 0.2 so that it stays visible. As in glTF, only the non-metallic part transmits (a fully metallic material stays opaque); the metallic channel of `metallicRoughnessTexture` is not taken into account (`metallicFactor` only). `transmissionTexture` is ignored, and so is transmission on MASK and unlit materials.
 - **Primitive modes:** POINTS and LINES primitives are skipped with a warning.
 - **Animations:** Only one animation is converted, chosen with `options.animation`.

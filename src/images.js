@@ -7,6 +7,33 @@
 const USDZ_TYPES = new Set(["image/png", "image/jpeg"]);
 
 /**
+ * Whether an image can carry alpha, from its bytes: PNG with color type 4 / 6 (gray / RGB
+ * + alpha) or a tRNS chunk before IDAT; JPEG never. Anything else, or a malformed PNG,
+ * counts as having alpha (the caller then keeps reading the texture's alpha).
+ * glTF reads a missing alpha channel as 1; Quick Look draws the `a` output of such a
+ * UsdUVTexture as 0, so materials use a constant opacity instead (see convert.js).
+ * @param {Uint8Array} bytes
+ * @returns {boolean}
+ */
+export function imageHasAlpha(bytes) {
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return false;
+  const sig = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  if (bytes.length < 33 || sig.some((b, i) => bytes[i] !== b)) return true;
+  const type = (p) => String.fromCharCode(bytes[p], bytes[p + 1], bytes[p + 2], bytes[p + 3]);
+  if (type(12) !== "IHDR") return true;
+  const colorType = bytes[25];
+  if (colorType === 4 || colorType === 6) return true;
+  for (let p = 33; p + 8 <= bytes.length;) {
+    const length = ((bytes[p] << 24) | (bytes[p + 1] << 16) | (bytes[p + 2] << 8) | bytes[p + 3]) >>> 0;
+    const name = type(p + 4);
+    if (name === "tRNS") return true;
+    if (name === "IDAT" || name === "IEND") return false;
+    p += 12 + length;
+  }
+  return true; // truncated before IDAT
+}
+
+/**
  * Image indices whose textures would be lost: the image a texture uses (its source, or
  * EXT_texture_webp's source when it has no PNG / JPEG source) is not PNG / JPEG.
  * @param {import("./glb.js").GltfAsset} asset

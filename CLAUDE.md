@@ -29,7 +29,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
 | `src/names.js` | `sanitize()`, `uniqueName()` | prim 名・ジョイント名 |
 | `src/ir.js` | `Layer` / `Prim`（`attr()` / `rel()` / `child()`） | USD 側のプリム・属性ツリー。値の表現規約は冒頭コメント |
 | `src/usda.js` | `writeUsda(layer)` → USDA 文字列 | 型名から書式を決める。timeSamples 対応 |
-| `src/images.js` | `imagesToConvert()`, `browserImageConverter()` | USDZ に入れられない画像（WebP）の変換。非同期 API（`glbToUsdzAsync`）から使う |
+| `src/images.js` | `imagesToConvert()`, `browserImageConverter()`, `imageHasAlpha()` | USDZ に入れられない画像（WebP）の変換。非同期 API（`glbToUsdzAsync`）から使う |
 | `src/png.js` | `encodeGrayAlphaPng()` | 変換器が自分で作るテクスチャ（頂点アルファのランプ）用の小さな PNG 書き出し |
 | `src/usdz.js` | `packUsdz(entries)` → `Uint8Array`、`planLayout()`、`UsdzLimitError` | stored-only zip、64 バイトアライン、CRC32 自前。ZIP の上限とエントリ名を書く前に検査 |
 | `src/index.d.ts` | 公開 API の型定義（手書き） | `src/index.js` の export を変えたら必ず合わせる。export 名の一致は `test/run.js`、型は `npm run test:types`（`test/types.ts`） |
@@ -131,7 +131,8 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
 
 ### 未対応（既知）
 - マテリアルがあるメッシュの頂点カラー RGB（`displayColor` は書くがマテリアルに掛けない。glTF は baseColor に掛ける）
-- 頂点アルファ × baseColorTexture のアルファ（UsdPreviewSurface では掛けられない。テクスチャのアルファを使い警告）
+- Quick Look での両面表示（`doubleSided` は書くが Quick Look は無視する。警告。設計判断 27）
+- 頂点アルファ × baseColorTexture のアルファ（UsdPreviewSurface では掛けられない。テクスチャのアルファを使い警告。テクスチャにアルファチャンネルがなければ掛け算は不要なので正確に表せる。設計判断 26）
 - ZIP64（4 GiB を超える USDZ は `UsdzLimitError`）
 - KHR_materials_volume / specular / sheen など（警告）
 - Draco のビットストリーム 2.2 以外（KHR_draco_mesh_compression が 2.2 を規定しているので、glTF では出てこないはず）
@@ -344,6 +345,20 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
    頂点アルファ付きの BLEND では `primvars:displayOpacity` にも同じ値を掛けてマテリアルと揃える。gacha_normal_V3.glb のガラスは
    metallicFactor 0.01 なので出力は変わらない（変更前とバイト単位で一致）。テストは `test/transmission.js`。features.glb の未対応拡張の例は KHR_materials_sheen に替えた。
    gacha_normal_V3.glb の変換結果はユーザーが見た目を確認して OK（issue #2 を close）。
+
+26. **アルファチャンネルのないベースカラーテクスチャでは opacity をテクスチャに繋がない。** glTF ではアルファのない画像のアルファは 1 なので、
+   `textureOpacity()` はそういう画像なら `constantOpacity()`（factor.a、頂点アルファがあればランプ）に切り替える。以前は BLEND / MASK で常に
+   `inputs:opacity` ← `Texture_baseColor.outputs:a` で、アルファのない画像の `a` をビューアがどう読むかに頼っていた（UsdUVTexture の仕様上も
+   明確でない）。判定は `imageHasAlpha()`（`src/images.js`）でバイト列から: PNG のカラータイプ 4 / 6 か IDAT より前の tRNS があればアルファあり、
+   JPEG はなし、それ以外・壊れた PNG はアルファありとみなす（従来の出力のまま）。`planVertexAlpha()` も同じ判定を使い、
+   アルファのないテクスチャ + 頂点アルファのマテリアルはランプ（COLOR_0.a × factor.a で正確）にして警告しない。
+   変更前後で出力が変わったのは手元の 28 入力のうち MeshoptCubeTest（10 マテリアル）だけ。テストは `test/color.js`。
+   きっかけは MeshoptCubeTest のラベル板が Quick Look で消えたことだが、原因はこちらではなく設計判断 27 だった
+   （この修正だけではラベル板は出なかった）。Quick Look がアルファのない画像の `a` を 0 と読むかは未確認。
+27. **doubleSided は USD の `doubleSided` に書き、Quick Look では効かないと警告する。** Mac の Finder の Quick Look は `doubleSided = 1` を無視して
+   表面だけを描く（ユーザー確認: MeshoptCubeTest のラベル板は表面が −Z 向きで、そのままでは消え、面の向きと法線だけを +Z に反転すると表示された）。
+   裏面を複製して書く案（primvar・スキン・モーフも複製が要る）は、ユーザーの判断でいったん見送り。必要ならオプションにする。
+   警告は文言が同じなので変換ごとに 1 回（`ctx.warn` の重複排除）。Khronos の結合テストでは 3 モデルで出る。
 
 ## OpenUSD バリデータに指摘されて直した点（再発注意）
 

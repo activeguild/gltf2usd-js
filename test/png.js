@@ -5,23 +5,31 @@
  * @param {number} w
  * @param {number} h
  * @param {(x: number, y: number) => [number, number, number, number]} pixel  y = 0 is the top row
+ * @param {{ colorType?: 0 | 2 | 4 | 6, trns?: Uint8Array }} [opts]  8-bit gray / RGB / gray + alpha /
+ *   RGBA (default) and an optional tRNS chunk; gray takes the pixel's R
  * @returns {Uint8Array}
  */
-export function encodePng(w, h, pixel) {
-  const raw = new Uint8Array(h * (1 + w * 4));
+export function encodePng(w, h, pixel, { colorType = 6, trns } = {}) {
+  const channels = { 0: [0], 2: [0, 1, 2], 4: [0, 3], 6: [0, 1, 2, 3] }[colorType];
+  const n = channels.length;
+  const raw = new Uint8Array(h * (1 + w * n));
   for (let y = 0; y < h; y++) {
-    const row = y * (1 + w * 4);
+    const row = y * (1 + w * n);
     raw[row] = 0; // filter: none
-    for (let x = 0; x < w; x++) raw.set(pixel(x, y), row + 1 + x * 4);
+    for (let x = 0; x < w; x++) {
+      const p = pixel(x, y);
+      raw.set(channels.map((c) => p[c]), row + 1 + x * n);
+    }
   }
   const ihdr = new Uint8Array(13);
   const dv = new DataView(ihdr.buffer);
   dv.setUint32(0, w);
   dv.setUint32(4, h);
-  ihdr.set([8, 6, 0, 0, 0], 8); // 8-bit RGBA
+  ihdr.set([8, colorType, 0, 0, 0], 8);
   return concat([
     new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     chunk("IHDR", ihdr),
+    ...(trns ? [chunk("tRNS", trns)] : []),
     chunk("IDAT", zlibStored(raw)),
     chunk("IEND", new Uint8Array(0)),
   ]);
