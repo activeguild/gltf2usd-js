@@ -140,16 +140,30 @@ export interface StageResult {
 // Conversion functions
 // ---------------------------------------------------------------------------
 
-/** glTF → USDA text plus the textures it references. Accepts .gltf as well as GLB. */
+/** glTF → USDA text plus the textures it references. Accepts GLB and .gltf. */
+export function toUsda(input: GltfInput, options?: ConvertOptions): UsdaResult;
+
+/** glTF → USDZ bytes. Accepts GLB and .gltf. */
+export function toUsdz(input: GltfInput, options?: ConvertOptions): Uint8Array;
+
+/** Like `toUsda`, but first converts images USDZ cannot hold (e.g. WebP) with `convertImage`. */
+export function toUsdaAsync(input: GltfInput, options?: AsyncConvertOptions): Promise<UsdaResult>;
+
+/** Like `toUsdz`, but first converts images USDZ cannot hold (e.g. WebP) with `convertImage`. */
+export function toUsdzAsync(input: GltfInput, options?: AsyncConvertOptions): Promise<Uint8Array>;
+
+// The original names (same functions as above, still supported). Despite "glb", they accept .gltf too.
+
+/** Same as `toUsda`. */
 export function glbToUsda(input: GltfInput, options?: ConvertOptions): UsdaResult;
 
-/** glTF → USDZ bytes. Accepts .gltf as well as GLB. */
+/** Same as `toUsdz`. */
 export function glbToUsdz(input: GltfInput, options?: ConvertOptions): Uint8Array;
 
-/** Like `glbToUsda`, but first converts images USDZ cannot hold (e.g. WebP) with `convertImage`. */
+/** Same as `toUsdaAsync`. */
 export function glbToUsdaAsync(input: GltfInput, options?: AsyncConvertOptions): Promise<UsdaResult>;
 
-/** Like `glbToUsdz`, but first converts images USDZ cannot hold (e.g. WebP) with `convertImage`. */
+/** Same as `toUsdzAsync`. */
 export function glbToUsdzAsync(input: GltfInput, options?: AsyncConvertOptions): Promise<Uint8Array>;
 
 /** A `GltfAsset` → USDA text plus textures (`gltfToStage` followed by `writeUsda`). */

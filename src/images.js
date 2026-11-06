@@ -1,5 +1,5 @@
 // Converting texture images that USDZ cannot hold (USDZ allows PNG and JPEG only), e.g.
-// EXT_texture_webp. Decoding WebP needs the platform: the async API (glbToUsdzAsync)
+// EXT_texture_webp. Decoding WebP needs the platform: the async API (toUsdzAsync)
 // converts with options.convertImage, which defaults to browserImageConverter where the
 // browser provides createImageBitmap + OffscreenCanvas. The synchronous API and Node
 // without a convertImage keep the previous behaviour (texture dropped, with a warning).

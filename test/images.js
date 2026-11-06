@@ -41,7 +41,7 @@ const converted = encodePng(2, 2, () => [0, 255, 0, 255]);
   const { usda, files } = glbToUsda(glb, { onWarning: (w) => warnings.push(w) });
   assert(!files.length && !usda.includes("UsdUVTexture"), "sync: WebP texture dropped");
   assert(warnings.some((w) => /EXT_texture_webp \(required\) is not supported/.test(w)), `sync: extension warning: ${warnings}`);
-  assert(warnings.some((w) => /Image 0 has unsupported type image\/webp.*glbToUsdzAsync/.test(w)), `sync: image warning: ${warnings}`);
+  assert(warnings.some((w) => /Image 0 has unsupported type image\/webp.*toUsdzAsync/.test(w)), `sync: image warning: ${warnings}`);
 }
 {
   // Async API with a converter: the WebP image is packaged as the converter's PNG.

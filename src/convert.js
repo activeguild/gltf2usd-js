@@ -74,7 +74,7 @@ export function gltfToStage(asset, options = {}) {
     files: [],            // extra files to package: { name, bytes }
     imageNames: new Map(), // image index -> file name
     usedFileNames: new Set(),
-    // Image index → { bytes, mimeType } replacing images USDZ cannot hold (glbToUsdzAsync).
+    // Image index → { bytes, mimeType } replacing images USDZ cannot hold (toUsdzAsync).
     imageOverrides: options.imageOverrides ?? new Map(),
     warn: makeWarn(options.onWarning),
     meshPrimPaths: new Map(), // "mesh:primitive" → USD paths of its Mesh prims
@@ -206,7 +206,7 @@ function reportUnsupported(ctx) {
   const { json, warn } = ctx;
   for (const ext of json.extensionsUsed || []) {
     if (SUPPORTED_EXTENSIONS.has(ext)) continue;
-    // EXT_texture_webp is usable once every WebP image was converted (glbToUsdzAsync).
+    // EXT_texture_webp is usable once every WebP image was converted (toUsdzAsync).
     if (ext === "EXT_texture_webp" && webpSources(json).every((i) => ctx.imageOverrides.has(i))) continue;
     const required = (json.extensionsRequired || []).includes(ext);
     warn(`Extension ${ext}${required ? " (required)" : ""} is not supported; its data is ignored`);
@@ -1137,7 +1137,7 @@ function imageFile(ctx, imgIndex) {
     ctx.warn(`Image ${imgIndex} could not be resolved${image?.uri ? ` (uri: ${image.uri.slice(0, 64)})` : ""}; texture ignored`);
   } else if (img.mimeType !== "image/png" && img.mimeType !== "image/jpeg") {
     ctx.warn(`Image ${imgIndex} has unsupported type ${img.mimeType ?? "(unknown)"}; USDZ allows PNG and JPEG only` +
-      " (glbToUsdzAsync converts it in browsers, or with options.convertImage)");
+      " (toUsdzAsync converts it in browsers, or with options.convertImage)");
   } else {
     const ext = img.mimeType === "image/jpeg" ? "jpg" : "png";
     const base = sanitize(image.name, `image_${imgIndex}`);

@@ -6,7 +6,7 @@ import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
 
-import { glbToUsdzAsync, parseGltf, resolveResource } from "../src/index.js";
+import { toUsdzAsync, parseGltf, resolveResource } from "../src/index.js";
 import { buildAnimatedGlb, buildCubeGlb, buildCubeGltf, buildFeatureGlb, buildSkinnedGlb } from "../test/cube-glb.js";
 import { readUsdz } from "./usdz-reader.js";
 import { parseUsda, traverse, primReferences } from "./usda-parser.js";
@@ -292,7 +292,7 @@ async function run(glb, name, resources = new Map()) {
   try {
     const t0 = performance.now();
     // Async: WebP textures (EXT_texture_webp) are converted to PNG / JPEG by the browser.
-    usdz = await glbToUsdzAsync(glb, { resources, onWarning: (msg) => converterWarnings.push(msg) });
+    usdz = await toUsdzAsync(glb, { resources, onWarning: (msg) => converterWarnings.push(msg) });
     ms = performance.now() - t0;
   } catch (err) {
     if (stale()) return;

@@ -1,6 +1,7 @@
 // Type check of src/index.d.ts: `npm run test:types` (tsc --noEmit, never executed).
 // Imports the package by name so the "exports" / "types" entries in package.json are checked too.
 import {
+  toUsda, toUsdz, toUsdaAsync, toUsdzAsync,
   glbToUsda, glbToUsdz, glbToUsdaAsync, glbToUsdzAsync, gltfToUsda,
   parseGltf, parseGLB, GltfAsset, resolveResource, gltfToStage, writeUsda, packUsdz, Layer, Prim,
   GltfValidationError, UsdzLimitError, DataUnavailableError, DEFAULT_LIMITS, browserImageConverter,
@@ -39,6 +40,8 @@ const usdz: Uint8Array = glbToUsdz(inputs[0], options);
 const { usda, files }: UsdaResult = glbToUsda(json, { animation: 1 });
 const s: string = usda;
 const f: PackagedFile[] = files;
+const usdz2: Uint8Array = toUsdz("{}", options);
+const usda2: UsdaResult = toUsda(json);
 
 // Async conversion with a custom image converter (sync or async result).
 const convertImage: ImageConverter = async (data, mimeType) =>
@@ -47,6 +50,8 @@ const asyncOptions: AsyncConvertOptions = { ...options, convertImage };
 async function run(): Promise<void> {
   const z: Uint8Array = await glbToUsdzAsync(bytes, asyncOptions);
   const a: UsdaResult = await glbToUsdaAsync("{}", { convertImage: () => null });
+  const z2: Uint8Array = await toUsdzAsync(bytes, asyncOptions);
+  const a2: UsdaResult = await toUsdaAsync(json);
   const b = await browserImageConverter(bytes, "image/webp");
   if (b) {
     const m: "image/png" | "image/jpeg" = b.mimeType;
