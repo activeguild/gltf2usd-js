@@ -158,6 +158,7 @@ const usdz: Uint8Array = toUsdz(bytes, options);
 - ベースカラー、メタリック・ラフネス、法線、オクルージョン、エミッシブ（それぞれ係数とテクスチャ）。alphaMode の BLEND / MASK、両面表示
 - PNG / JPEG のテクスチャ、サンプラーのラップモード、複数の UV セット
 - BLEND / MASK のマテリアルでの頂点アルファ（`COLOR_0` の VEC4）。Quick Look は頂点ごとの不透明度を直接読めないので、アルファのランプ画像と専用の UV セットで表す
+- 透過するガラス（`KHR_materials_transmission`）は半透明にする: opacity = `max(1 − transmissionFactor, 0.2)`
 
 **アニメーション・スキン・モーフターゲット**（UsdSkel）
 - スキンは Skeleton / SkelAnimation / ジョイントのウェイトになる（JOINTS_n / WEIGHTS_n はいくつでも）
@@ -188,6 +189,7 @@ const usdz: Uint8Array = toUsdz(bytes, options);
 - **頂点アルファとベースカラーテクスチャ:** 頂点アルファとベースカラーテクスチャのアルファは掛け合わせず、テクスチャのアルファを使います。UsdPreviewSurface では 2 つの入力を掛け合わせられないためです。
 - **プリミティブのモード:** POINTS / LINES のプリミティブは、警告を出して飛ばします。
 - **アニメーション:** 変換するのは 1 本だけで、`options.animation` で選びます。
+- **透過:** UsdPreviewSurface には透過・屈折がないので、透過するマテリアルは半透明で表します。完全に透過するガラスも、見えなくならないよう opacity 0.2 を残します。`transmissionTexture` と、MASK・unlit のマテリアルの透過は無視します。
 - **未対応:** カメラ、KHR_materials_volume / specular / sheen、KTX2 のテクスチャ、USDC（バイナリ）出力、ZIP64。
 
 捨てた情報は、すべて `onWarning` で知らせます。

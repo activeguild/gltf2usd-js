@@ -311,6 +311,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
    （ベースカラーテクスチャは `inputs:scale` の a だけ、頂点アルファはランプの scale）。MASK は opacityThreshold と半透明を
    両立できないので無視して警告、unlit も無視して警告。transmissionTexture は無視して警告（factor のみ）。適用したマテリアルごとに
    「近似した」と警告する。テストは `test/transmission.js`。features.glb の未対応拡張の例は KHR_materials_sheen に替えた。
+   gacha_normal_V3.glb の変換結果はユーザーが見た目を確認して OK（issue #2 を close）。
 
 ## OpenUSD バリデータに指摘されて直した点（再発注意）
 
