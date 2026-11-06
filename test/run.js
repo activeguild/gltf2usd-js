@@ -381,7 +381,10 @@ assert(cubeWarnings.length === 0, `cube has no warnings: ${cubeWarnings}`);
 assert(api.glbToUsda === api.toUsda && api.glbToUsdz === api.toUsdz, "glbToUsda / glbToUsdz are aliases");
 assert(api.glbToUsdaAsync === api.toUsdaAsync && api.glbToUsdzAsync === api.toUsdzAsync, "glbTo*Async are aliases");
 assert(toUsda(glb).usda === usda, "toUsda output");
-assert(toUsdz(glb).length === usdz.length, "toUsdz output");
+{
+  const z = toUsdz(glb);
+  assert(z.length === usdz.length && z.every((b, i) => b === usdz[i]), "toUsdz output (byte-identical)");
+}
 
 // src/index.d.ts declares exactly the runtime exports of src/index.js (types: npm run test:types).
 {

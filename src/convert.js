@@ -739,14 +739,16 @@ function planVertexAlpha(json) {
 }
 
 /**
- * COLOR_0 alpha → primvars:displayOpacity (COLOR_0.a × baseColorFactor.a) when the
- * primitive's material uses alpha, else null. It records the vertex alpha on the gprim;
- * the material reads the same alpha through vertexAlphaUV (see planVertexAlpha).
+ * COLOR_0 alpha → primvars:displayOpacity (COLOR_0.a × baseColorFactor.a, × the
+ * KHR_materials_transmission opacity for BLEND) when the primitive's material uses alpha,
+ * else null. It records the vertex alpha on the gprim; the material reads the same alpha
+ * through vertexAlphaUV (see planVertexAlpha).
  */
 function displayOpacity(ctx, prim, alpha) {
   const mat = prim.material !== undefined ? ctx.json.materials?.[prim.material] : undefined;
   if (!usesAlpha(mat)) return null;
-  const factorAlpha = (mat.pbrMetallicRoughness?.baseColorFactor ?? [1, 1, 1, 1])[3];
+  // MASK ignores transmission (opacity 1), matching the material.
+  const factorAlpha = (mat.pbrMetallicRoughness?.baseColorFactor ?? [1, 1, 1, 1])[3] * transmissionOpacity(mat).opacity;
   return alpha.map((a) => a * factorAlpha);
 }
 
@@ -883,7 +885,9 @@ function buildMaterial(ctx, scope, mat, index) {
   const emissive = (mat.emissiveFactor || [0, 0, 0]).map((v) => v * emissiveStrength);
   const alphaMode = mat.alphaMode || "OPAQUE";
   // KHR_materials_transmission multiplies the opacity (1 when absent).
-  const seeThrough = transmissionOpacity(ctx, name, mat, alphaMode);
+  const transmission = transmissionOpacity(mat);
+  warnTransmission(ctx, name, mat, transmission);
+  const seeThrough = transmission.opacity;
   const alpha = alphaMode === "BLEND" ? baseColor[3] * seeThrough : baseColor[3];
 
   const material = scope.child(new Prim("Material", name, { spaced: true }));
@@ -1066,34 +1070,51 @@ function buildMaterial(ctx, scope, mat, index) {
   }
 }
 
+const unitFactor = (v, fallback) => (typeof v === "number" && Number.isFinite(v) ? Math.min(Math.max(v, 0), 1) : fallback);
+
 /**
- * KHR_materials_transmission → the factor that multiplies the material's opacity.
+ * KHR_materials_transmission → how it applies to a material:
+ * { kind: "none" | "unlit" | "mask" | "metallic" | "applied", opacity }, where opacity
+ * multiplies the material's opacity (1 unless applied).
  * UsdPreviewSurface has no transmission (or refraction), so the transmitted light is
- * approximated as see-through: opacity = max(1 - transmissionFactor, TRANSMISSION_MIN_OPACITY),
- * which keeps a fully transmissive glass faintly visible. OPAQUE materials become translucent;
- * BLEND multiplies the alpha. MASK cannot express both a cutout and partial opacity with
- * opacityThreshold, so transmission is ignored there (as with KHR_materials_unlit, which
- * replaces the lighting model). transmissionTexture is ignored (factor only).
+ * approximated as see-through. glTF transmits through the dielectric part only (metallic
+ * surfaces stay opaque), so the transmitted fraction is transmissionFactor × (1 − metallicFactor)
+ * and opacity = max(1 − that, TRANSMISSION_MIN_OPACITY), which keeps a fully transmissive
+ * glass faintly visible. OPAQUE materials become translucent; BLEND multiplies the alpha.
+ * MASK cannot express both a cutout and partial opacity with opacityThreshold, so
+ * transmission is ignored there (as with KHR_materials_unlit, which replaces the lighting
+ * model). Textures (transmissionTexture, the metallic channel) are not read: factors only.
+ * Pure (no warnings), so buildMaterial and displayOpacity agree; see warnTransmission.
  */
-function transmissionOpacity(ctx, name, mat, alphaMode) {
+function transmissionOpacity(mat) {
+  const tr = mat?.extensions?.KHR_materials_transmission;
+  if (!tr || typeof tr !== "object") return { kind: "none", opacity: 1 };
+  const factor = unitFactor(tr.transmissionFactor, 0);
+  if (factor <= 0) return { kind: "none", opacity: 1 };
+  if (mat.extensions.KHR_materials_unlit) return { kind: "unlit", opacity: 1 };
+  if (mat.alphaMode === "MASK") return { kind: "mask", opacity: 1 };
+  const transmitted = factor * (1 - unitFactor(mat.pbrMetallicRoughness?.metallicFactor, 1));
+  if (transmitted <= 0) return { kind: "metallic", opacity: 1 };
+  return { kind: "applied", opacity: Math.max(1 - transmitted, TRANSMISSION_MIN_OPACITY) };
+}
+
+/** The warnings for transmissionOpacity()'s result (once per material). */
+function warnTransmission(ctx, name, mat, { kind }) {
   const tr = mat.extensions?.KHR_materials_transmission;
-  if (!tr || typeof tr !== "object") return 1;
-  const factor = typeof tr.transmissionFactor === "number" && Number.isFinite(tr.transmissionFactor)
-    ? Math.min(Math.max(tr.transmissionFactor, 0), 1) : 0;
+  const label = `Material "${name}": KHR_materials_transmission`;
+  if (kind === "unlit") ctx.warn(`${label} is ignored on an unlit material`);
+  if (kind === "mask") {
+    ctx.warn(`${label} is ignored with alphaMode MASK (UsdPreviewSurface cannot combine a cutout with partial opacity)`);
+  }
+  // Fully metallic (factor 1) is opaque in glTF too; a metallic texture could still make parts dielectric.
+  if ((kind === "metallic" || kind === "applied") && mat.pbrMetallicRoughness?.metallicRoughnessTexture) {
+    ctx.warn(`${label}: metallicRoughnessTexture is not taken into account; the transmitted amount uses metallicFactor only`);
+  }
+  if (kind !== "applied") return;
   if (tr.transmissionTexture) {
     ctx.warn(`Material "${name}": transmissionTexture has no UsdPreviewSurface input; only transmissionFactor is used`);
   }
-  if (factor <= 0) return 1;
-  if (mat.extensions.KHR_materials_unlit) {
-    ctx.warn(`Material "${name}": KHR_materials_transmission is ignored on an unlit material`);
-    return 1;
-  }
-  if (alphaMode === "MASK") {
-    ctx.warn(`Material "${name}": KHR_materials_transmission is ignored with alphaMode MASK (UsdPreviewSurface cannot combine a cutout with partial opacity)`);
-    return 1;
-  }
-  ctx.warn(`Material "${name}": KHR_materials_transmission is approximated as opacity (UsdPreviewSurface has no transmission or refraction)`);
-  return Math.max(1 - factor, TRANSMISSION_MIN_OPACITY);
+  ctx.warn(`${label} is approximated as opacity (UsdPreviewSurface has no transmission or refraction)`);
 }
 
 /** The TEXCOORD sets a material's textures read from. */

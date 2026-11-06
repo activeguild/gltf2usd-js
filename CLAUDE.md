@@ -43,7 +43,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
 | `test/draco.js` | Draco: ベクトルとの一致、壊れた入力が `DracoError` になること、glTF 側（accessor の充填・型変換・検証） | `npm test`（ブラウザでも動く） |
 | `test/run.js` | JS 側の単体テスト（prim 名、zip アライン検証） | `npm test` |
 | `test/validation.js` / `accessor.js` / `color.js` / `usdz.js` / `edge-cases.js` | 入力検証、行列 accessor、頂点カラー / アルファ、USDZ の上限、アニメーション / スキンの境界値 | `npm test`（`usdz.js` 以外はブラウザでも動く。`images.js` も） |
-| `test/transmission.js` | KHR_materials_transmission の opacity 近似（OPAQUE / BLEND / テクスチャ / MASK / unlit） | `npm test` |
+| `test/transmission.js` | KHR_materials_transmission の opacity 近似（OPAQUE / BLEND / テクスチャ / MASK / unlit / metallic / displayOpacity） | `npm test` |
 | `test/images.js` | WebP 画像の扱い（同期版は警告、非同期版は `convertImage` で変換） | `npm test` |
 | `test/gltf-builder.js` | テスト用に glTF / GLB を組み立てる小さなヘルパ | |
 | `test/integration/` | Khronos glTF-Sample-Assets（コミット固定、SHA-256 照合）の 22 モデルで変換・zip・内容・OpenUSD 検証 | `npm run test:integration`（ネットワーク。`-- --offline` でキャッシュのみ） |
@@ -113,7 +113,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
   bufferView 単位でデコードしてキャッシュ。設計判断 23）
 - KHR_mesh_quantization（整数・正規化 accessor + ノード変換。gltf-transform で量子化した DamagedHelmet / CesiumMan を
   three.js と比較して一致を確認）
-- KHR_materials_transmission（設計判断 25。opacity = max(1 − transmissionFactor, 0.2) で近似）
+- KHR_materials_transmission（設計判断 25。opacity = max(1 − transmissionFactor × (1 − metallicFactor), 0.2) で近似）
 - KHR_materials_emissive_strength（emissiveColor に乗算）、KHR_materials_ior（`inputs:ior`）、
   KHR_materials_clearcoat（`inputs:clearcoat` / `clearcoatRoughness`、テクスチャは R / G。clearcoatNormal は警告）
 - `options.onWarning`: 未対応拡張、POINTS / LINES、アニメーション / スキン / カメラ / モーフ、複数シーン、
@@ -310,7 +310,12 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
    OPAQUE はこの値を `inputs:opacity` に書いて半透明にし（テクスチャのアルファは glTF どおり使わない）、BLEND はアルファに掛ける
    （ベースカラーテクスチャは `inputs:scale` の a だけ、頂点アルファはランプの scale）。MASK は opacityThreshold と半透明を
    両立できないので無視して警告、unlit も無視して警告。transmissionTexture は無視して警告（factor のみ）。適用したマテリアルごとに
-   「近似した」と警告する。テストは `test/transmission.js`。features.glb の未対応拡張の例は KHR_materials_sheen に替えた。
+   「近似した」と警告する。
+   glTF の透過は誘電体の成分だけに効く（金属は不透明）ので、透過量は `transmissionFactor × (1 − metallicFactor)`（metallicFactor の既定は 1）。
+   metallicRoughnessTexture の B は見ず、テクスチャがあれば警告する。transmissionTexture の警告は近似を適用したときだけ出す
+   （factor 0・MASK・unlit・完全な金属では無関係なため）。`transmissionOpacity()` は警告を出さない純関数で、警告は `warnTransmission()`。
+   頂点アルファ付きの BLEND では `primvars:displayOpacity` にも同じ値を掛けてマテリアルと揃える。gacha_normal_V3.glb のガラスは
+   metallicFactor 0.01 なので出力は変わらない（変更前とバイト単位で一致）。テストは `test/transmission.js`。features.glb の未対応拡張の例は KHR_materials_sheen に替えた。
    gacha_normal_V3.glb の変換結果はユーザーが見た目を確認して OK（issue #2 を close）。
 
 ## OpenUSD バリデータに指摘されて直した点（再発注意）

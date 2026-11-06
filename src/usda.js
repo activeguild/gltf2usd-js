@@ -110,16 +110,8 @@ function fmtValue(typeName, v) {
     }
     const n = TUPLE_SIZE[base];
     if (n) return `[${fmtVecs(v, n)}]`;
-    const chunks = [];
-    let s = "";
     const int = INT_TYPES.has(base);
-    for (let i = 0; i < v.length; i++) {
-      if (i) s += ", ";
-      s += int ? String(Math.trunc(v[i])) : fmtScalar(base, v[i]);
-      if (s.length > 4096) { chunks.push(s); s = ""; }
-    }
-    chunks.push(s);
-    return `[${chunks.join("")}]`;
+    return `[${joinChunked(v.length, 1, (i) => (int ? String(Math.trunc(v[i])) : fmtScalar(base, v[i])))}]`;
   }
   if (typeName === "matrix4d") return fmtMatrix(v);
   if (TUPLE_SIZE[typeName]) return fmtTuple(v);
@@ -200,20 +192,27 @@ function fmtTuple(arr) {
   return `${s})`;
 }
 
-// Large arrays: tuples are appended to a short string that is flushed into a list of chunks
-// every few KB. Joining one array entry per tuple (the old way) or one ever-growing string
+// Large arrays: elements are appended to a short string that is flushed into a list of chunks
+// every few KB. Joining one array entry per element (the old way) or one ever-growing string
 // both spent most of the time in allocation and GC.
-function fmtVecs(data, n) {
+/** item(i) for i = 0, step, 2·step, … < length, joined with ", ". */
+function joinChunked(length, step, item) {
   const chunks = [];
   let s = "";
-  for (let i = 0; i < data.length; i += n) {
-    s += i ? ", (" : "(";
-    for (let c = 0; c < n; c++) s += c ? `, ${fmt(data[i + c])}` : fmt(data[i + c]);
-    s += ")";
+  for (let i = 0; i < length; i += step) {
+    s += i ? `, ${item(i)}` : item(i);
     if (s.length > 4096) { chunks.push(s); s = ""; }
   }
   chunks.push(s);
   return chunks.join("");
+}
+
+function fmtVecs(data, n) {
+  return joinChunked(data.length, n, (i) => {
+    let s = "(";
+    for (let c = 0; c < n; c++) s += c ? `, ${fmt(data[i + c])}` : fmt(data[i + c]);
+    return `${s})`;
+  });
 }
 
 function fmtMatrix(m, o = 0) {
