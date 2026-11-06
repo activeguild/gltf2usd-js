@@ -158,6 +158,7 @@ const usdz: Uint8Array = toUsdz(bytes, options);
 - Base color, metallic-roughness, normal, occlusion and emissive (factor and texture each), alphaMode BLEND / MASK, double-sided
 - PNG and JPEG textures, sampler wrap modes, multiple UV sets
 - Vertex alpha (`COLOR_0` VEC4) with BLEND / MASK materials. Quick Look cannot read per-vertex opacity directly, so it is written as an alpha ramp texture with a dedicated UV set.
+- Transmissive glass (`KHR_materials_transmission`) becomes translucent: opacity = `max(1 − transmissionFactor, 0.2)`.
 
 **Animation, skinning, morph targets** (UsdSkel)
 - Skins become Skeleton, SkelAnimation and joint influences (any number of JOINTS_n / WEIGHTS_n sets)
@@ -172,6 +173,7 @@ const usdz: Uint8Array = toUsdz(bytes, options);
 | `KHR_texture_transform` | ✅ `UsdTransform2d` |
 | `KHR_materials_emissive_strength`, `KHR_materials_ior`, `KHR_materials_clearcoat` | ✅ |
 | `KHR_materials_unlit` | ✅ approximated (black diffuse + emission) |
+| `KHR_materials_transmission` | ✅ approximated as opacity: `max(1 − transmissionFactor, 0.2)` (no refraction; the 0.2 floor keeps clear glass visible). Ignored with `MASK`; `transmissionTexture` is ignored |
 | `KHR_materials_variants` | ✅ a `materialVariant` variantSet |
 | `KHR_lights_punctual` | ✅ UsdLux (intensities copied as-is; AR Quick Look ignores lights) |
 | `KHR_mesh_quantization` | ✅ |
@@ -185,9 +187,10 @@ const usdz: Uint8Array = toUsdz(bytes, options);
 
 - **Vertex color RGB and materials:** On a mesh that has a material, the vertex color RGB is written as `displayColor` but is not multiplied into the material.
 - **Vertex alpha and base color textures:** Vertex alpha is not combined with a base color texture's alpha; the texture alpha is used. UsdPreviewSurface cannot multiply two inputs.
+- **Transmission:** UsdPreviewSurface has no transmission or refraction, so transmissive materials are drawn as translucent instead. Fully transmissive glass keeps an opacity of 0.2 so that it stays visible. `transmissionTexture` is ignored, and so is transmission on MASK and unlit materials.
 - **Primitive modes:** POINTS and LINES primitives are skipped with a warning.
 - **Animations:** Only one animation is converted, chosen with `options.animation`.
-- **Not supported:** cameras, KHR_materials_transmission / volume / specular / sheen, KTX2 textures, USDC (binary) output, ZIP64.
+- **Not supported:** cameras, KHR_materials_volume / specular / sheen, KTX2 textures, USDC (binary) output, ZIP64.
 
 Everything that is dropped is reported through `onWarning`.
 

@@ -55,7 +55,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "test": "node test/make-glb.js && node test/run.js && node test/validation.js && node test/accessor.js && node test/color.js && node test/usdz.js && node test/edge-cases.js && node test/images.js && node test/draco.js",
+    "test": "node test/make-glb.js && node test/run.js && node test/validation.js && node test/accessor.js && node test/color.js && node test/usdz.js && node test/edge-cases.js && node test/images.js && node test/draco.js && node test/transmission.js",
     "test:types": "npx -y -p typescript@6.0.2 tsc -p test/tsconfig.json",
     "demo": "node demo/server.js",
     "test:integration": "node test/integration/run.js",

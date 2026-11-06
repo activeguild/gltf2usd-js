@@ -35,6 +35,8 @@ const SUPPORTED_EXTENSIONS = new Set([
   "KHR_materials_emissive_strength",
   "KHR_materials_ior",
   "KHR_materials_clearcoat",
+  // Approximated as opacity (see transmissionOpacity).
+  "KHR_materials_transmission",
   // Quantized attributes are ordinary (normalized) integer accessors plus node transforms;
   // verified against three.js with gltf-transform-quantized DamagedHelmet / CesiumMan.
   "KHR_mesh_quantization",
@@ -45,6 +47,10 @@ const SUPPORTED_EXTENSIONS = new Set([
   "EXT_meshopt_compression",
   "KHR_draco_mesh_compression",
 ]);
+
+// KHR_materials_transmission → opacity = max(1 - transmission, this). UsdPreviewSurface has
+// no transmission input; without the floor a fully transmissive glass would vanish.
+const TRANSMISSION_MIN_OPACITY = 0.2;
 
 /** USD primvar name for glTF TEXCOORD_n: st, st1, st2, ... (strings are primvar names as-is) */
 const uvSetName = (n) => (typeof n === "string" ? n : n === 0 ? "st" : `st${n}`);
@@ -876,6 +882,9 @@ function buildMaterial(ctx, scope, mat, index) {
   const emissiveStrength = ext.KHR_materials_emissive_strength?.emissiveStrength ?? 1;
   const emissive = (mat.emissiveFactor || [0, 0, 0]).map((v) => v * emissiveStrength);
   const alphaMode = mat.alphaMode || "OPAQUE";
+  // KHR_materials_transmission multiplies the opacity (1 when absent).
+  const seeThrough = transmissionOpacity(ctx, name, mat, alphaMode);
+  const alpha = alphaMode === "BLEND" ? baseColor[3] * seeThrough : baseColor[3];
 
   const material = scope.child(new Prim("Material", name, { spaced: true }));
   material.attr("token", "outputs:surface", undefined, { connect: `${path}/PreviewSurface.outputs:surface` });
@@ -889,11 +898,14 @@ function buildMaterial(ctx, scope, mat, index) {
   // the ramp texture (see planVertexAlpha).
   let threshold = mat.alphaCutoff ?? 0.5; // MASK; the vertex alpha step ramp uses 0.5
   const constantOpacity = () => {
-    if (alphaMode === "OPAQUE") return;
+    if (alphaMode === "OPAQUE") {
+      if (seeThrough < 1) surface.attr("float", "inputs:opacity", seeThrough);
+      return;
+    }
     if (ctx.vertexAlphaMaterials.has(index)) {
       // BLEND: ramp × factor.a. MASK: glTF keeps a fragment when COLOR_0.a × factor.a ≥ cutoff,
       // i.e. COLOR_0.a ≥ cutoff / factor.a: a 0 / 1 step ramp, cut at its middle (0.5).
-      let file, scale = [1, 1, 1, baseColor[3]];
+      let file, scale = [1, 1, 1, alpha];
       if (alphaMode === "MASK") {
         const limit = baseColor[3] > 0 ? (mat.alphaCutoff ?? 0.5) / baseColor[3] : Infinity;
         file = vertexAlphaRampFile(ctx, limit > 1 ? MASK_RAMP_SIZE : maskStep(limit));
@@ -908,11 +920,14 @@ function buildMaterial(ctx, scope, mat, index) {
       });
       surface.attr("float", "inputs:opacity", undefined, connect("Texture_vertexAlpha", "a"));
     } else {
-      surface.attr("float", "inputs:opacity", baseColor[3]);
+      surface.attr("float", "inputs:opacity", alpha);
     }
   };
   const textureOpacity = () => {
-    if (alphaMode === "OPAQUE") return;
+    if (alphaMode === "OPAQUE") {
+      if (seeThrough < 1) surface.attr("float", "inputs:opacity", seeThrough);
+      return;
+    }
     surface.attr("float", "inputs:opacity", undefined, connect("Texture_baseColor", "a"));
     if (ctx.vertexAlphaTextured.has(index)) {
       ctx.warn(`Material "${name}": COLOR_0 alpha is not combined with the baseColorTexture alpha (UsdPreviewSurface cannot multiply them); the texture alpha is used`);
@@ -941,7 +956,7 @@ function buildMaterial(ctx, scope, mat, index) {
     // Base color
     const bcTex = textureFile(ctx, pbr.baseColorTexture);
     if (bcTex) {
-      textures.push({ shader: "Texture_baseColor", ...bcTex, colorSpace: "sRGB", scale: baseColor });
+      textures.push({ shader: "Texture_baseColor", ...bcTex, colorSpace: "sRGB", scale: [...baseColor.slice(0, 3), alpha] });
       surface.attr("color3f", "inputs:diffuseColor", undefined, connect("Texture_baseColor", "rgb"));
       textureOpacity();
     } else {
@@ -1049,6 +1064,36 @@ function buildMaterial(ctx, scope, mat, index) {
     for (const c of ["r", "g", "b", "a"]) tex.attr("float", `outputs:${c}`);
     tex.attr("float3", "outputs:rgb");
   }
+}
+
+/**
+ * KHR_materials_transmission → the factor that multiplies the material's opacity.
+ * UsdPreviewSurface has no transmission (or refraction), so the transmitted light is
+ * approximated as see-through: opacity = max(1 - transmissionFactor, TRANSMISSION_MIN_OPACITY),
+ * which keeps a fully transmissive glass faintly visible. OPAQUE materials become translucent;
+ * BLEND multiplies the alpha. MASK cannot express both a cutout and partial opacity with
+ * opacityThreshold, so transmission is ignored there (as with KHR_materials_unlit, which
+ * replaces the lighting model). transmissionTexture is ignored (factor only).
+ */
+function transmissionOpacity(ctx, name, mat, alphaMode) {
+  const tr = mat.extensions?.KHR_materials_transmission;
+  if (!tr || typeof tr !== "object") return 1;
+  const factor = typeof tr.transmissionFactor === "number" && Number.isFinite(tr.transmissionFactor)
+    ? Math.min(Math.max(tr.transmissionFactor, 0), 1) : 0;
+  if (tr.transmissionTexture) {
+    ctx.warn(`Material "${name}": transmissionTexture has no UsdPreviewSurface input; only transmissionFactor is used`);
+  }
+  if (factor <= 0) return 1;
+  if (mat.extensions.KHR_materials_unlit) {
+    ctx.warn(`Material "${name}": KHR_materials_transmission is ignored on an unlit material`);
+    return 1;
+  }
+  if (alphaMode === "MASK") {
+    ctx.warn(`Material "${name}": KHR_materials_transmission is ignored with alphaMode MASK (UsdPreviewSurface cannot combine a cutout with partial opacity)`);
+    return 1;
+  }
+  ctx.warn(`Material "${name}": KHR_materials_transmission is approximated as opacity (UsdPreviewSurface has no transmission or refraction)`);
+  return Math.max(1 - factor, TRANSMISSION_MIN_OPACITY);
 }
 
 /** The TEXCOORD sets a material's textures read from. */

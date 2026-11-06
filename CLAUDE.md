@@ -43,6 +43,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
 | `test/draco.js` | Draco: ベクトルとの一致、壊れた入力が `DracoError` になること、glTF 側（accessor の充填・型変換・検証） | `npm test`（ブラウザでも動く） |
 | `test/run.js` | JS 側の単体テスト（prim 名、zip アライン検証） | `npm test` |
 | `test/validation.js` / `accessor.js` / `color.js` / `usdz.js` / `edge-cases.js` | 入力検証、行列 accessor、頂点カラー / アルファ、USDZ の上限、アニメーション / スキンの境界値 | `npm test`（`usdz.js` 以外はブラウザでも動く。`images.js` も） |
+| `test/transmission.js` | KHR_materials_transmission の opacity 近似（OPAQUE / BLEND / テクスチャ / MASK / unlit） | `npm test` |
 | `test/images.js` | WebP 画像の扱い（同期版は警告、非同期版は `convertImage` で変換） | `npm test` |
 | `test/gltf-builder.js` | テスト用に glTF / GLB を組み立てる小さなヘルパ | |
 | `test/integration/` | Khronos glTF-Sample-Assets（コミット固定、SHA-256 照合）の 22 モデルで変換・zip・内容・OpenUSD 検証 | `npm run test:integration`（ネットワーク。`-- --offline` でキャッシュのみ） |
@@ -112,6 +113,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
   bufferView 単位でデコードしてキャッシュ。設計判断 23）
 - KHR_mesh_quantization（整数・正規化 accessor + ノード変換。gltf-transform で量子化した DamagedHelmet / CesiumMan を
   three.js と比較して一致を確認）
+- KHR_materials_transmission（設計判断 25。opacity = max(1 − transmissionFactor, 0.2) で近似）
 - KHR_materials_emissive_strength（emissiveColor に乗算）、KHR_materials_ior（`inputs:ior`）、
   KHR_materials_clearcoat（`inputs:clearcoat` / `clearcoatRoughness`、テクスチャは R / G。clearcoatNormal は警告）
 - `options.onWarning`: 未対応拡張、POINTS / LINES、アニメーション / スキン / カメラ / モーフ、複数シーン、
@@ -127,7 +129,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
 - 頂点アルファ × baseColorTexture のアルファ（UsdPreviewSurface では掛けられない。テクスチャのアルファを使い警告）
 - KHR_meshopt_compression（EXT_ 版とはバージョン・フィルタが違う。fallback buffer を読めないものとして扱い、該当メッシュをスキップして警告）
 - ZIP64（4 GiB を超える USDZ は `UsdzLimitError`）
-- KHR_materials_transmission / volume / specular / sheen など（警告）
+- KHR_materials_volume / specular / sheen など（警告）
 - Draco のビットストリーム 2.2 以外（KHR_draco_mesh_compression が 2.2 を規定しているので、glTF では出てこないはず）
 - 読めないデータ（デコードできない Draco で fallback がない、壊れた meshopt 列など）は `DataUnavailableError` になり、
   メッシュ / アニメーションのチャンネル / スキンの単位でスキップして警告（以前のように 0 埋めで壊れたメッシュは出さない）
@@ -302,6 +304,14 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
    残す（`export { toUsda as glbToUsda, ... }`。破壊的変更なし、非推奨にもしない）。`gltfToUsdz` にしなかったのは、既存の `gltfToUsda` が
    `GltfAsset` を受け取る下位 API で、入力の型が違う関数が同じ接頭辞で並ぶと紛らわしいから。README・CLI・デモは新しい名前を使う。
    別名であることは `test/run.js` で確認している。
+25. **KHR_materials_transmission は opacity で近似する（下限 0.2）。** UsdPreviewSurface には transmission / 屈折の入力がない。
+   ユーザー提供の gacha_normal_V3.glb（ガラスが alpha 1 の BLEND + transmissionFactor 1）が不透明に出る報告を受け、ユーザーの判断で
+   `opacity = max(1 − transmissionFactor, TRANSMISSION_MIN_OPACITY = 0.2)` にした（素直な `1 − t` だと透明なガラスが完全に消える）。
+   OPAQUE はこの値を `inputs:opacity` に書いて半透明にし（テクスチャのアルファは glTF どおり使わない）、BLEND はアルファに掛ける
+   （ベースカラーテクスチャは `inputs:scale` の a だけ、頂点アルファはランプの scale）。MASK は opacityThreshold と半透明を
+   両立できないので無視して警告、unlit も無視して警告。transmissionTexture は無視して警告（factor のみ）。適用したマテリアルごとに
+   「近似した」と警告する。テストは `test/transmission.js`。features.glb の未対応拡張の例は KHR_materials_sheen に替えた。
+   gacha_normal_V3.glb の変換結果はユーザーが見た目を確認して OK（issue #2 を close）。
 
 ## OpenUSD バリデータに指摘されて直した点（再発注意）
 
@@ -331,7 +341,6 @@ npm run demo                               # 見た目の確認: サンプルと
 
 ## 要相談（ユーザー判断待ち）
 
-- **KHR_materials_transmission**: UsdPreviewSurface に対応入力がない。現状は警告のみ。`opacity = 1 - transmission` で近似するか
 - **複数アニメーション**: 現状は 1 本（`options.animation`）。`variantSet` で切替にするか、別ノードを動かすクリップは統合するか
   （例: Khronos の InterpolationTest は 9 クリップがそれぞれ別のキューブを動かすので、統合すれば全部入る。Fox は Survey / Walk / Run）
 - **CUBICSPLINE のベイク間隔**: 24fps で最大 3e-3 の誤差。もっと細かくするか
@@ -350,8 +359,7 @@ npm run demo                               # 見た目の確認: サンプルと
 - [x] TEXCOORD_1 → `primvars:st1`、`texCoord` フィールドを見てテクスチャごとに `uvReader_st1` を使う（TEXCOORD_n 全般）
 - [x] KHR_texture_transform → `UsdTransform2d` シェーダを `uvReader` と `UsdUVTexture` の間に挟む
 - [x] KHR_materials_emissive_strength / ior / clearcoat（UsdPreviewSurface に対応する入力があるもののみ）
-- [ ] KHR_materials_transmission: UsdPreviewSurface に対応入力がないので現状は警告のみ。`opacity = 1 - transmission` で
-      近似するかは要相談（ガラスが消えて見える副作用がある）
+- [x] KHR_materials_transmission: opacity で近似（下限 0.2。設計判断 25）
 - [x] sampler の wrapS/wrapT（REPEAT / CLAMP_TO_EDGE / MIRRORED_REPEAT → `repeat` / `clamp` / `mirror`）
 - [x] 外部 `.gltf` 入力（`options.resources` = Map / object / `(uri) => bytes`。CLI は隣接ファイル、デモは複数ファイル選択）
 - [x] 画像名の衝突回避（同名画像が複数ある場合）。大文字小文字を区別せずに比較

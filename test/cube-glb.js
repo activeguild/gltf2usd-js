@@ -34,7 +34,7 @@ export function buildCubeGlb() {
  *  - "UV1": baseColor from TEXCOORD_1 (= TEXCOORD_0 * 0.5, i.e. one quadrant)
  *  - "Transformed": KHR_texture_transform (offset / rotation / scale)
  *  - a child node named like its parent's mesh prim (prim name collision)
- *  - "Coated": KHR_materials_emissive_strength / ior / clearcoat (+ transmission, unsupported)
+ *  - "Coated": KHR_materials_emissive_strength / ior / clearcoat / transmission (+ sheen, unsupported)
  *  - KHR_lights_punctual: directional "Sun", point "Bulb" (with range → warning), spot "Cone"
  * The quadrant texture (red / green on top, blue / yellow at the bottom) makes
  * flips and rotations visible in the demo.
@@ -50,7 +50,7 @@ export function buildFeatureGlb() {
     asset: { version: "2.0", generator: "test-features" },
     extensionsUsed: [
       "KHR_materials_unlit", "KHR_texture_transform", "KHR_materials_emissive_strength",
-      "KHR_materials_ior", "KHR_materials_clearcoat", "KHR_materials_transmission", "KHR_lights_punctual",
+      "KHR_materials_ior", "KHR_materials_clearcoat", "KHR_materials_transmission", "KHR_materials_sheen", "KHR_lights_punctual",
     ],
     extensions: {
       KHR_lights_punctual: {
@@ -121,6 +121,7 @@ export function buildFeatureGlb() {
           KHR_materials_ior: { ior: 1.33 },
           KHR_materials_clearcoat: { clearcoatFactor: 0.8, clearcoatRoughnessTexture: { index: 2 }, clearcoatRoughnessFactor: 0.5 },
           KHR_materials_transmission: { transmissionFactor: 0.5 },
+          KHR_materials_sheen: { sheenColorFactor: [1, 1, 1] },
         },
       },
     ],
