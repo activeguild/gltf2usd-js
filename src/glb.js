@@ -96,9 +96,16 @@ export function parseGLB(arrayBuffer, { limits } = {}) {
   return { json, bin };
 }
 
+/** The meshopt extension a bufferView uses ("EXT_meshopt_compression" / "KHR_meshopt_compression"), or null. */
+function meshoptExtension(bv) {
+  if (bv.extensions?.KHR_meshopt_compression) return "KHR_meshopt_compression";
+  if (bv.extensions?.EXT_meshopt_compression) return "EXT_meshopt_compression";
+  return null;
+}
+
 /**
  * Thrown when an accessor's bytes are not in the file in readable form, e.g. a
- * bufferView compressed with EXT_meshopt_compression whose buffer is only a
+ * bufferView compressed with EXT_ / KHR_meshopt_compression whose buffer is only a
  * fallback placeholder. Callers skip the affected primitive / channel and warn.
  */
 export class DataUnavailableError extends Error {
@@ -126,7 +133,7 @@ export class GltfAsset {
     this.limits = resolveLimits(limits);
     validateDocument(json, this.limits);
     this._buffers = (json.buffers || []).map((b, i) => this._loadBuffer(b, i));
-    this._decodedViews = new Map(); // EXT_meshopt_compression results by bufferView index
+    this._decodedViews = new Map(); // EXT_ / KHR_meshopt_compression results by bufferView index
     this._dracoMeshes = new Map(); // KHR_draco_mesh_compression results (or errors) by bufferView index
     // Accessors filled from Draco data: accessor index -> { bufferView, uniqueId } (uniqueId
     // null for indices). The first primitive that names an accessor wins.
@@ -176,9 +183,7 @@ export class GltfAsset {
 
   _loadBuffer(buffer, index) {
     if (buffer.uri === undefined) {
-      // EXT_meshopt_compression: a "fallback" buffer has no data; its views must be decoded.
-      // KHR_meshopt_compression (not supported) marks its fallback buffers the same way; their
-      // views are then unreadable, so the affected meshes are skipped with a warning.
+      // EXT_ / KHR_meshopt_compression: a "fallback" buffer has no data; its views must be decoded.
       const ext = buffer.extensions;
       if (ext?.EXT_meshopt_compression?.fallback || ext?.KHR_meshopt_compression?.fallback) return null;
       if (index !== 0 || !this.bin) throw new GltfValidationError(`Buffer ${index} has no uri and no GLB BIN chunk`);
@@ -203,7 +208,7 @@ export class GltfAsset {
     return bytes;
   }
 
-  /** Raw bytes of a bufferView (decompressed if it uses EXT_meshopt_compression). */
+  /** Raw bytes of a bufferView (decompressed if it uses EXT_ / KHR_meshopt_compression). */
   bufferViewBytes(index) {
     return this._viewData(index);
   }
@@ -212,17 +217,18 @@ export class GltfAsset {
   _viewData(index) {
     if (this._decodedViews.has(index)) return this._decodedViews.get(index);
     const bv = this.json.bufferViews[index];
-    const ext = bv.extensions?.EXT_meshopt_compression;
+    const name = meshoptExtension(bv);
+    const ext = name && bv.extensions[name];
     const src = ext && this._buffers[ext.buffer];
     if (src) {
       let bytes;
       try {
-        bytes = decodeMeshopt(new Uint8Array(src.buffer, src.byteOffset + (ext.byteOffset || 0), ext.byteLength), ext);
+        bytes = decodeMeshopt(new Uint8Array(src.buffer, src.byteOffset + (ext.byteOffset || 0), ext.byteLength), ext, name);
       } catch (e) {
         throw new DataUnavailableError(`bufferView ${index}: ${e.message}`);
       }
       if (bytes.byteLength !== bv.byteLength) {
-        throw new DataUnavailableError(`bufferView ${index}: EXT_meshopt_compression decoded ${bytes.byteLength} bytes, byteLength is ${bv.byteLength}`);
+        throw new DataUnavailableError(`bufferView ${index}: ${name} decoded ${bytes.byteLength} bytes, byteLength is ${bv.byteLength}`);
       }
       this._decodedViews.set(index, bytes);
       return bytes;

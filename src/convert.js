@@ -46,6 +46,7 @@ const SUPPORTED_EXTENSIONS = new Set([
   "EXT_mesh_gpu_instancing",
   "KHR_materials_variants",
   "EXT_meshopt_compression",
+  "KHR_meshopt_compression",
   "KHR_draco_mesh_compression",
 ]);
 

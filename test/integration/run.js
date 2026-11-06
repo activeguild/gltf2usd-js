@@ -90,9 +90,11 @@ function checkContent(json, usda, zipNames, warnings, errors) {
   if (triangles.length && !meshPrims) errors.push("content: no Mesh prims were written");
   // KHR_draco_mesh_compression is decoded (src/draco.js): no primitive may be skipped or fall back.
   for (const w of warnings) if (/KHR_draco_mesh_compression/.test(w)) errors.push(`content: Draco data was not decoded: ${w}`);
-  // Unsupported compression must be reported, never silently dropped.
-  if ((json.extensionsUsed || []).includes("KHR_meshopt_compression") && !warnings.some((w) => /KHR_meshopt_compression/.test(w))) {
-    errors.push("content: KHR_meshopt_compression is not reported as unsupported");
+  // EXT_ / KHR_meshopt_compression are decoded (src/meshopt.js): no view may fail to decode.
+  for (const w of warnings) if (/meshopt_compression/.test(w)) errors.push(`content: meshopt data was not decoded: ${w}`);
+  // Every triangle primitive must become a Mesh prim (a skipped one would otherwise hide here).
+  if ((json.extensionsUsed || []).some((e) => /meshopt_compression/.test(e)) && meshPrims < triangles.length) {
+    errors.push(`content: ${triangles.length} triangle primitives, only ${meshPrims} Mesh prims`);
   }
   const usedMaterials = new Set(triangles.map((p) => p.material).filter((m) => m !== undefined));
   const materialPrims = count(/def Material "/g);

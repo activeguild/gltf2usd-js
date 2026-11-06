@@ -338,7 +338,7 @@
     {
       "id": "MeshoptCubeTest-khr",
       "features": [
-        "KHR_meshopt_compression (unsupported: compressed meshes skipped with a warning)",
+        "KHR_meshopt_compression (vertex codec v0 / v1, all filters including COLOR)",
         "texture"
       ],
       "files": [

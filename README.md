@@ -178,10 +178,10 @@ const usdz: Uint8Array = toUsdz(bytes, options);
 | `KHR_lights_punctual` | ✅ UsdLux (intensities copied as-is; AR Quick Look ignores lights) |
 | `KHR_mesh_quantization` | ✅ |
 | `EXT_meshopt_compression` | ✅ built-in decoder |
+| `KHR_meshopt_compression` | ✅ built-in decoder (vertex codec v0 / v1, all filters including `COLOR`) |
 | `KHR_draco_mesh_compression` | ✅ built-in decoder (Draco bitstream 2.2; output identical to Google's decoder) |
 | `EXT_mesh_gpu_instancing` | ✅ one instanceable reference per instance (custom `_` attributes are ignored, with a warning) |
 | `EXT_texture_webp` | ✅ async API only (converted to PNG / JPEG) |
-| `KHR_meshopt_compression` | ❌ compressed data is skipped with a warning |
 
 ## Limitations
 

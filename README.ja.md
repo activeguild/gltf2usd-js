@@ -178,10 +178,10 @@ const usdz: Uint8Array = toUsdz(bytes, options);
 | `KHR_lights_punctual` | ✅ UsdLux（強さはそのまま書く。AR Quick Look はライトを無視する） |
 | `KHR_mesh_quantization` | ✅ |
 | `EXT_meshopt_compression` | ✅ デコーダを内蔵 |
+| `KHR_meshopt_compression` | ✅ デコーダを内蔵（頂点コーデック v0 / v1、`COLOR` を含む全フィルタ） |
 | `KHR_draco_mesh_compression` | ✅ デコーダを内蔵（Draco ビットストリーム 2.2。Google のデコーダと同じ結果） |
 | `EXT_mesh_gpu_instancing` | ✅ インスタンスごとに instanceable な参照（`_` で始まる独自属性は警告を出して無視） |
 | `EXT_texture_webp` | ✅ 非同期 API のみ（PNG / JPEG に変換） |
-| `KHR_meshopt_compression` | ❌ 圧縮されたデータは警告付きで飛ばす |
 
 ## 制限事項
 
