@@ -668,7 +668,12 @@ function buildMeshPrimData(ctx, parent, prim, name, skel, gltfMesh) {
     // Variant-mapped primitives get their binding from the variantSet only: a binding
     // authored here (a local opinion) would be stronger than any variant's.
     if (!variantMapped) mesh.rel("material:binding", `/Root/Materials/${uniqueMaterialName(ctx, prim.material)}`);
-    if (ctx.json.materials[prim.material].doubleSided) mesh.attr("bool", "doubleSided", true, { uniform: true });
+    if (ctx.json.materials[prim.material].doubleSided) {
+      mesh.attr("bool", "doubleSided", true, { uniform: true });
+      // Quick Look / AR Quick Look draw front faces only, whatever doubleSided says (tested on
+      // device: Khronos MeshoptCubeTest's label boards face away and vanish). Same text → one warning.
+      ctx.warn("Double-sided materials are written as USD doubleSided, which Quick Look / AR Quick Look ignore (back faces are not drawn)");
+    }
   }
 }
 

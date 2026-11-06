@@ -272,5 +272,14 @@ for (const [cutoff, factor] of [[0.25, 1], [0.25, 0.5], [0.5, 1], [0.7, 0.8], [1
   }
 }
 
+// doubleSided is written, with a warning that Quick Look ignores it (once per conversion).
+{
+  const { usda, warnings } = convert(colored({ type: "VEC3", colors: RGB, material: { doubleSided: true } }));
+  assert(line(usda, "doubleSided").includes("uniform bool doubleSided = 1"), "doubleSided written");
+  assert(warnings.filter((w) => w.includes("Quick Look / AR Quick Look ignore")).length === 1, `doubleSided warning: ${warnings}`);
+  const single = convert(colored({ type: "VEC3", colors: RGB, material: {} }));
+  assert(!single.usda.includes("doubleSided") && !single.warnings.length, "single-sided: no attribute, no warning");
+}
+
 if (failures) { console.error(`color: ${failures} failure(s)`); process.exit(1); }
 console.log("color tests passed");
