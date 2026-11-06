@@ -20,6 +20,16 @@ export function multiply(a, b) {
   return out;
 }
 
+/**
+ * True when the upper 3x3 of an affine matrix is (numerically) singular, e.g. a node
+ * scaled by 0. Relative to the column lengths, so uniformly tiny scales still count as invertible.
+ */
+export function isSingular(m, eps = 1e-9) {
+  const det = m[0] * (m[5] * m[10] - m[6] * m[9]) - m[4] * (m[1] * m[10] - m[2] * m[9]) + m[8] * (m[1] * m[6] - m[2] * m[5]);
+  const n = Math.hypot(m[0], m[1], m[2]) * Math.hypot(m[4], m[5], m[6]) * Math.hypot(m[8], m[9], m[10]);
+  return !n || Math.abs(det) <= eps * n;
+}
+
 /** General 4x4 inverse (cofactor expansion). Returns identity for singular input. */
 export function invert(m) {
   const [a00, a01, a02, a03, a10, a11, a12, a13, a20, a21, a22, a23, a30, a31, a32, a33] = m;

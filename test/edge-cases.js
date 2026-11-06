@@ -125,6 +125,31 @@ const xform = { animationMode: "xform" };
   assert(usda.includes("def SkelAnimation") && usda.includes("translations.timeSamples"), "skeleton mode");
 }
 
+{
+  // Scale "flipbook": a node hidden by scale 0 at rest and shown by a scale key. Its rest
+  // world matrix is singular, so it cannot be the bind transform (inverse(bind) · geomBind
+  // would collapse or blow up the mesh); the joint binds at identity instead.
+  const { json, bin: triBin } = triangleDoc();
+  const { bin: animBin, views } = packParts([new Float32Array([0, 1]), new Float32Array([0, 0, 0, 1, 1, 1])]);
+  const bin = new Uint8Array(triBin.length + animBin.length);
+  bin.set(triBin); bin.set(animBin, triBin.length);
+  json.buffers[0].byteLength = bin.length;
+  for (const v of views) json.bufferViews.push({ ...v, byteOffset: v.byteOffset + triBin.length });
+  json.accessors.push(
+    { bufferView: 2, componentType: 5126, count: 2, type: "SCALAR" },
+    { bufferView: 3, componentType: 5126, count: 2, type: "VEC3" },
+  );
+  json.nodes[0].scale = [0, 0, 0];
+  json.nodes[0].translation = [1, 2, 3];
+  json.animations = [{ samplers: [{ input: 2, output: 3, interpolation: "STEP" }], channels: [{ sampler: 0, target: { node: 0, path: "scale" } }] }];
+  const { usda, warnings } = run(makeGlb(json, bin));
+  const id = "( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1) )";
+  assert(usda.includes(`uniform matrix4d[] bindTransforms = [${id}]`), "scale 0 at rest: bindTransforms is identity");
+  assert(usda.includes(`matrix4d primvars:skel:geomBindTransform = ${id}`), "scale 0 at rest: geomBindTransform is identity");
+  assert(/restTransforms = \[\( \(0, 0, 0, 0\), \(0, 0, 0, 0\), \(0, 0, 0, 0\), \(1, 2, 3, 1\) \)\]/.test(usda), "scale 0 at rest: rest pose keeps scale 0");
+  assert(!warnings.length, `scale 0 at rest warnings: ${warnings}`);
+}
+
 // ---------- Skinning ----------
 
 /**

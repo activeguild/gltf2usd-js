@@ -195,6 +195,9 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
    Apple の見本（toy_drummer / hummingbird）もスケルトンのみ。usdzconvert の `bindRigidDeformation` と同じ方式
    （ただし usdzconvert 自身はノードアニメーションを xformOp で書いている）。OpenUSD 上はどちらも正しく評価される。
    three.js と OpenUSD の頂点比較で animated.glb / BoxAnimated / CesiumMilkTruck / InterpolationTest が一致（CUBICSPLINE 以外 1e-5 以内）。
+   rest のワールド行列が特異（rest で scale 0 にして隠し、scale のキーで切り替える「パラパラ漫画」型）なジョイントは、
+   bindTransforms / geomBindTransform を単位行列にする（`isSingular()`）。rest のままだと inverse(bind) が取れず、そのフレームが一度も表示されなかった。
+   ユーザー提供の flipbook_scale_sample.glb（8 フレーム、STEP）で、OpenUSD のスキニング結果が各時刻ちょうど 1 フレームだけ見えることを確認。
 17. **スケルトンがあれば `/Root` 自体を SkelRoot にする。** 確認ビューアは **Mac の Finder の Quick Look（スペースキー）**。
    SkelRoot を `/Root`（Xform）の下に入れ子にした出力は USDA / USDC とも再生されず、defaultPrim が SkelRoot の構成だけ再生された
    （USDA でも再生される＝形式は無関係）。各スケルトンの入れ物は Xform、SkelAnimation は Skeleton の子、剛体バインドの

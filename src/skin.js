@@ -13,7 +13,7 @@
 // their ancestors, e.g. an "Armature" node). Animation of those non-joint nodes is
 // not followed (warning).
 
-import { IDENTITY, decompose, invert, isIdentity, multiply, nodeLocalMatrix, composeTRS } from "./math.js";
+import { IDENTITY, decompose, invert, isIdentity, isSingular, multiply, nodeLocalMatrix, composeTRS } from "./math.js";
 import { sampleAt } from "./animation.js";
 import { Prim } from "./ir.js";
 import { sanitize, uniqueName } from "./names.js";
@@ -144,6 +144,9 @@ function buildPlan(ctx, skinIndex, skin, parent, world) {
  *
  * bindTransforms are the joints' rest world matrices; each mesh gets its node's rest
  * world matrix as geomBindTransform, so  jointSkel(t) · inverse(bind) · geomBind = jointSkel(t).
+ * A singular rest world matrix (a node hidden with scale 0 at rest, as in scale "flipbook"
+ * animations) cannot be inverted, so that joint binds at identity instead: bind = geomBind
+ * = identity gives the same jointSkel(t) · v.
  *
  * @param {Set<number>} exclude  nodes that are already handled (skin joints)
  * @returns {null | SkinPlan & { rigid: true, roots: Set<number> }}
@@ -171,7 +174,7 @@ export function planRigidAnimation(ctx, sceneNodes, exclude) {
   };
   roots.forEach(collect);
   const { joints, tokens, prefix } = jointHierarchy(ctx, jointList, parent, world, "Animation");
-  const bind = joints.map((j) => world(j));
+  const bind = joints.map((j) => (isSingular(world(j)) ? [...IDENTITY] : world(j)));
   const users = joints.filter((j) => json.nodes[j].mesh !== undefined);
   const name = uniqueName("Animated", ctx.skinNames);
   return { index: -1, name, joints, tokens, remap: null, bind, prefix, users, rigid: true, roots: new Set(roots) };
