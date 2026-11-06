@@ -4,6 +4,7 @@ import * as api from "../src/index.js";
 import { buildCubeGltf } from "./cube-glb.js";
 import { decodeMeshopt } from "../src/meshopt.js";
 import { VECTORS, CUBE_VIEWS } from "./meshopt-vectors.js";
+import { KHR_VECTORS } from "./meshopt-khr-vectors.js";
 import { fmt } from "../src/usda.js";
 import { crc32 } from "../src/usdz.js";
 
@@ -295,8 +296,15 @@ assert(f.usda.includes('def Mesh "CubeC"') && f.usda.includes('def Xform "CubeC_
   }
   // The cube with all four bufferViews meshopt-compressed (fallback buffer has no data)
   // must convert to exactly the same USDA as the uncompressed cube.
-  const { gltf, resources } = buildCubeGltf();
-  const j = JSON.parse(gltf);
+  const { resources } = buildCubeGltf();
+  const w = [];
+  assert(glbToUsda(meshoptCube("EXT_meshopt_compression"), { resources, onWarning: (m) => w.push(m) }).usda === usda && w.length === 0, `meshopt cube converts like the plain cube: ${w}`);
+}
+
+/** The cube with its four bufferViews compressed (CUBE_VIEWS, vertex codec v0) under `name`. */
+function meshoptCube(name) {
+  const fromB64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+  const j = JSON.parse(buildCubeGltf().gltf);
   const packed = CUBE_VIEWS.map((v) => fromB64(v.encoded));
   const all = new Uint8Array(packed.reduce((n, p) => n + p.length + ((4 - (p.length % 4)) % 4), 0));
   let off = 0;
@@ -305,15 +313,70 @@ assert(f.usda.includes('def Mesh "CubeC"') && f.usda.includes('def Xform "CubeC_
     j.bufferViews[i] = {
       buffer: 2, byteOffset: j.bufferViews[i].byteOffset, byteLength: j.bufferViews[i].byteLength,
       ...(v.mode === "ATTRIBUTES" ? { byteStride: v.byteStride } : {}),
-      extensions: { EXT_meshopt_compression: { buffer: 1, byteOffset: off, byteLength: packed[i].length, byteStride: v.byteStride, count: v.count, mode: v.mode } },
+      extensions: { [name]: { buffer: 1, byteOffset: off, byteLength: packed[i].length, byteStride: v.byteStride, count: v.count, mode: v.mode } },
     };
     off += packed[i].length + ((4 - (packed[i].length % 4)) % 4);
   });
   j.buffers.push({ byteLength: all.length, uri: `data:application/octet-stream;base64,${btoa(String.fromCharCode(...all))}` });
-  j.buffers.push({ byteLength: 1000, extensions: { EXT_meshopt_compression: { fallback: true } } });
-  j.extensionsUsed = j.extensionsRequired = ["EXT_meshopt_compression"];
+  j.buffers.push({ byteLength: 1000, extensions: { [name]: { fallback: true } } });
+  j.extensionsUsed = j.extensionsRequired = [name];
+  return j;
+}
+
+// ---- KHR_meshopt_compression decoder (vertex codec v1, COLOR filter) ----
+{
+  const KHR = "KHR_meshopt_compression";
+  const fromB64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+  const same = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+  for (const v of KHR_VECTORS) {
+    assert(same(decodeMeshopt(fromB64(v.encoded), v, KHR), fromB64(v.expected)), `meshopt ${v.name} (KHR) matches the reference decoder`);
+  }
+  // The EXT bitstreams (vertex codec v0) are valid KHR bitstreams.
+  for (const v of VECTORS) assert(same(decodeMeshopt(fromB64(v.encoded), v, KHR), fromB64(v.expected)), `meshopt ${v.name} decodes under KHR`);
+  const throws = (f, re, m) => {
+    try { f(); } catch (e) { assert(re.test(e.message), `${m}: ${e.message}`); return; }
+    assert(false, `${m}: no error`);
+  };
+  // v1 and COLOR are KHR only.
+  const v1 = KHR_VECTORS.find((v) => v.name === "v1 bit fields level 3");
+  const color = KHR_VECTORS.find((v) => v.name === "v0 COLOR uint8 K=8");
+  throws(() => decodeMeshopt(fromB64(v1.encoded), v1), /^EXT_meshopt_compression: unsupported vertex codec header 0xa1/, "EXT rejects vertex codec v1");
+  throws(() => decodeMeshopt(fromB64(color.encoded), color), /^EXT_meshopt_compression: unknown filter COLOR/, "EXT rejects the COLOR filter");
+  throws(() => decodeMeshopt(fromB64(color.encoded), { ...color, byteStride: 8, count: color.count / 2 }, KHR), /COLOR filter needs byteStride 4 or 8|size mismatch|truncated/, "COLOR with a wrong layout");
+  // Corrupt v1 streams fail with the KHR prefix: invalid channel modes, truncation, extra bytes.
+  const bytes = fromB64(v1.encoded);
+  const tailChannel = bytes.length - v1.byteStride / 4; // first channel mode byte
+  for (const mode of [3, 0x10, 0x11, 0x0f]) {
+    const bad = bytes.slice();
+    bad[tailChannel] = mode;
+    throws(() => decodeMeshopt(bad, v1, KHR), /^KHR_meshopt_compression: invalid channel mode/, `channel mode 0x${mode.toString(16)} rejected`);
+  }
+  for (const cut of [1, 5, 40, bytes.length - 30]) {
+    const bad = new Uint8Array(bytes.length - cut);
+    bad.set(bytes.subarray(0, 1 + (bytes.length - cut) - 1 - (v1.byteStride + v1.byteStride / 4)));
+    bad.set(bytes.subarray(bytes.length - (v1.byteStride + v1.byteStride / 4)), bad.length - (v1.byteStride + v1.byteStride / 4));
+    throws(() => decodeMeshopt(bad, v1, KHR), /^KHR_meshopt_compression: vertex data (truncated|too short|size mismatch)/, `stream cut by ${cut} bytes rejected`);
+  }
+  const longer = new Uint8Array(bytes.length + 1);
+  longer.set(bytes.subarray(0, 1));
+  longer.set(bytes.subarray(1), 2);
+  throws(() => decodeMeshopt(longer, v1, KHR), /^KHR_meshopt_compression: vertex data (size mismatch|truncated)/, "extra byte rejected");
+
+  // The meshopt cube under KHR_meshopt_compression converts like the plain cube.
+  const { resources } = buildCubeGltf();
   const w = [];
-  assert(glbToUsda(j, { resources, onWarning: (m) => w.push(m) }).usda === usda && w.length === 0, `meshopt cube converts like the plain cube: ${w}`);
+  assert(glbToUsda(meshoptCube(KHR), { resources, onWarning: (m) => w.push(m) }).usda === usda && w.length === 0, `KHR meshopt cube converts like the plain cube: ${w}`);
+  // Exclusions: a bufferView / buffer must not use both extensions.
+  const both = meshoptCube(KHR);
+  both.bufferViews[0].extensions.EXT_meshopt_compression = both.bufferViews[0].extensions[KHR];
+  throws(() => glbToUsda(both, { resources }), /bufferView 0: KHR_meshopt_compression and EXT_meshopt_compression must not be used together/, "bufferView with both meshopt extensions");
+  const bothBuffer = meshoptCube(KHR);
+  bothBuffer.buffers[2].extensions.EXT_meshopt_compression = { fallback: true };
+  throws(() => glbToUsda(bothBuffer, { resources }), /buffer 2: KHR_meshopt_compression and EXT_meshopt_compression must not be used together/, "buffer with both meshopt extensions");
+  // The compressed range is checked like EXT's.
+  const range = meshoptCube(KHR);
+  range.bufferViews[1].extensions[KHR].byteLength = 1e6;
+  throws(() => glbToUsda(range, { resources }), /Invalid bufferView range: bufferView 1 KHR_meshopt_compression data exceeds buffer 1/, "KHR compressed range checked");
 }
 
 // ---- Compressed data that cannot be decoded is skipped, not written as zeros ----
@@ -341,6 +404,13 @@ assert(f.usda.includes('def Mesh "CubeC"') && f.usda.includes('def Xform "CubeC_
   const w2 = [];
   const m = glbToUsda(mo, { resources, onWarning: (x) => w2.push(x) }).usda;
   assert(!m.includes("def Mesh") && w2.some((x) => x.includes("EXT_meshopt_compression") && x.includes("skipped")), `meshopt view skipped: ${w2}`);
+  // KHR_meshopt_compression data that does not decode (plain floats, header 0x00) is skipped the same way.
+  const khr = JSON.parse(gltf);
+  khr.buffers.push({ byteLength: 288, extensions: { KHR_meshopt_compression: { fallback: true } } });
+  khr.bufferViews[0] = { ...khr.bufferViews[0], buffer: 1, extensions: { KHR_meshopt_compression: { buffer: 0, byteOffset: 0, byteLength: 40, byteStride: 12, count: 24, mode: "ATTRIBUTES" } } };
+  const w4 = [];
+  const k = glbToUsda(khr, { resources, onWarning: (x) => w4.push(x) }).usda;
+  assert(!k.includes("def Mesh") && w4.some((x) => x.includes("KHR_meshopt_compression: unsupported vertex codec header") && x.includes("skipped")), `undecodable KHR meshopt view skipped: ${w4}`);
 }
 
 // fmt() takes an integer fast path; it must match the reference toPrecision(7) formatting exactly.

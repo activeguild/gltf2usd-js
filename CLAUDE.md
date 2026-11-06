@@ -23,7 +23,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
 | `src/animation.js` | `evaluateAnimation(ctx, which)`, `sampleAt()` | glTF アニメーション 1 本 → ノードごとの TRS / weights サンプル |
 | `src/skin.js` | `planSkins()`, `buildSkeleton()`, `skinningPrimvars()` | glTF skin → SkelRoot / Skeleton / SkelAnimation、jointIndices / Weights |
 | `src/morph.js` | `addBlendShapes()`, `restWeights()` | morph target → BlendShape prim、skel:blendShapes |
-| `src/meshopt.js` | `decodeMeshopt(source, ext)` | EXT_meshopt_compression の ATTRIBUTES / TRIANGLES / INDICES と 3 フィルタ |
+| `src/meshopt.js` | `decodeMeshopt(source, ext, extension)` | EXT_ / KHR_meshopt_compression の ATTRIBUTES / TRIANGLES / INDICES とフィルタ（KHR は頂点コーデック v1 と COLOR も） |
 | `src/draco.js` | `decodeDracoMesh(bytes, { maxValues })`, `DracoError` | KHR_draco_mesh_compression（Draco ビットストリーム 2.2 の三角形メッシュ）。設計判断 23 |
 | `src/math.js` | 4x4 行列（glTF 規約）、`decompose()`、`slerp()` | `composeTRS` もここ |
 | `src/names.js` | `sanitize()`, `uniqueName()` | prim 名・ジョイント名 |
@@ -39,6 +39,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
 | `test/make-glb.js` | 上記を `test/*.glb` と `test/gltf/`（外部ファイル付き .gltf）に書き出す | |
 | `test/png.js` | テスト画像用の小さな PNG エンコーダ | |
 | `test/meshopt-vectors.js` | meshopt のテストベクトル（meshoptimizer のエンコーダで生成した入力とリファレンス出力） | 依存なしでデコーダを検証するため |
+| `test/meshopt-khr-vectors.js` / `make-meshopt-khr-vectors.cpp` | KHR_meshopt_compression のテストベクトル 26 本（meshoptimizer v1.3 で圧縮、スカラー版デコーダの出力）と、その生成プログラム | 生成は meshoptimizer v1.3 の src を `-DMESHOPTIMIZER_NO_SIMD` で一緒にコンパイルして手で実行（手順はファイル先頭） |
 | `test/draco-vectors.js` / `make-draco-vectors.js` | Draco のテストベクトル（draco3d 1.5.9 で圧縮した 7 本と draco3d の復元結果の CRC32）と、その生成スクリプト | 生成は `npm install --no-save draco3d@1.5.9` のうえ手で実行。`--compare N` でランダム比較 |
 | `test/draco.js` | Draco: ベクトルとの一致、壊れた入力が `DracoError` になること、glTF 側（accessor の充填・型変換・検証） | `npm test`（ブラウザでも動く） |
 | `test/run.js` | JS 側の単体テスト（prim 名、zip アライン検証） | `npm test` |
@@ -63,6 +64,9 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
 - three.js（0.170.0）は import map で jsDelivr から読む。デモにだけ許される依存で、`src/` には入れない
 - 左の GLTFLoader には three.js の MeshoptDecoder と DRACOLoader（Google の WASM デコーダ、同じ three.js 0.170.0 の
   `examples/jsm/libs/draco/gltf/`）を渡している。右（変換結果）は `src/meshopt.js` / `src/draco.js` を使うので、左右の比較が検証になる
+- three.js 0.170.0 の GLTFLoader は KHR_meshopt_compression を知らない（EXT のみ）ので、KHR の meshopt ファイルは左に表示できない
+  （MeshoptCubeTest では fallback buffer を読もうとして「Invalid typed array length」）。右は表示でき、チェックもすべて通ることを確認済み。
+  左で比べるには three.js の更新が要る
 - **GLTFLoader の KHR_texture_transform は仕様とずれる**（S·R の順で合成するため、非一様 scale + rotation で崩れる）。
   `app.js` の `fixTextureTransforms()` で仕様どおりの行列に直してから左側に表示している
 - **新しい USD 機能を出力したら、`usd-preview.js` / `checks.js` もそれを読めるように更新する**
@@ -108,7 +112,8 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
 - KHR_lights_punctual → UsdLux（directional → DistantLight、point → SphereLight + treatAsPoint、spot → + ShapingAPI。
   強さは glTF の lux / candela をそのまま。UsdLux は単位を明示していないので近似。range は警告。AR Quick Look はライトを無視する）
 - KHR_materials_unlit（近似: diffuseColor = 黒、baseColor → emissiveColor、`ior = 1` でフレネル反射を消す。他の PBR 入力は無視）
-- EXT_meshopt_compression（`src/meshopt.js`。全モード・全フィルタ。bufferView 単位でデコードしてキャッシュ）
+- EXT_meshopt_compression / KHR_meshopt_compression（`src/meshopt.js`。全モード・全フィルタ。KHR は頂点コーデック v1 と COLOR フィルタも。
+  bufferView 単位でデコードしてキャッシュ。設計判断 15）
 - KHR_draco_mesh_compression（`src/draco.js`。ビットストリーム 2.2 のシーケンシャル / エッジブレイカー（標準・valence）、全予測方式。
   bufferView 単位でデコードしてキャッシュ。設計判断 23）
 - KHR_mesh_quantization（整数・正規化 accessor + ノード変換。gltf-transform で量子化した DamagedHelmet / CesiumMan を
@@ -127,7 +132,6 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
 ### 未対応（既知）
 - マテリアルがあるメッシュの頂点カラー RGB（`displayColor` は書くがマテリアルに掛けない。glTF は baseColor に掛ける）
 - 頂点アルファ × baseColorTexture のアルファ（UsdPreviewSurface では掛けられない。テクスチャのアルファを使い警告）
-- KHR_meshopt_compression（EXT_ 版とはバージョン・フィルタが違う。fallback buffer を読めないものとして扱い、該当メッシュをスキップして警告）
 - ZIP64（4 GiB を超える USDZ は `UsdzLimitError`）
 - KHR_materials_volume / specular / sheen など（警告）
 - Draco のビットストリーム 2.2 以外（KHR_draco_mesh_compression が 2.2 を規定しているので、glTF では出てこないはず）
@@ -190,6 +194,25 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
    gltf-transform で圧縮した 6 ファイルの全 55 bufferView、およびエンコーダを使ったランダムテスト 81 ケースでバイト一致。
    QUATERNION フィルタは float32 で計算（`Math.fround`）し、.5 ちょうどは 0 から遠い側へ丸める（スカラー版と同じ）。
    SIMD 版（three.js が使う）は偶数丸めなので、ちょうど .5 の値だけ int16 で 1 違う（表示上は無関係）。
+   **KHR_meshopt_compression** も同じ `decodeMeshopt()` で読む（第 3 引数で拡張名を渡す。エラー文の接頭辞も拡張名）。EXT との差は
+   頂点コーデック v1（ヘッダ 0xa1）と COLOR フィルタだけで、EXT では両方とも拒否する。v1 は KHR の仕様書（Appendix A）を基に、
+   仕様書が曖昧な所を meshoptimizer v1.3 の `vertexcodec.cpp`（スカラー版）で確かめた: ブロック先頭に byteStride / 4 バイトの制御ビット
+   （0 / 1 = ビット長の表 {0,1,2,4} / {1,2,4,8}、2 = 全部 0 でデータなし、3 = 生のバイト。**生のバイトは 16 に切り上げない n バイト**）、
+   1 ビットのグループは下位ビットから詰める、テールは基準頂点 + チャンネルモード（byteStride / 4 バイト）で最小 24 バイト（v0 は 32）、
+   チャンネルモード 1 = 16 ビットの zigzag 差分、2 = 32 ビットの XOR 差分で、上位 4 ビットの r だけ**右**に回してから XOR する。
+   チャンネルモードは仕様どおり検査する（下位 4 ビットが 3 以上、または 0 / 1 で上位 4 ビットが 0 でないものは不正。リファレンスは
+   下位 2 ビットしか見ないので、ここだけリファレンスより厳しい）。4 バイトのチャンネルごとに 4 つのバイト面をデコードしてから差分を戻す。
+   COLOR はスカラー版と同じく float32（`Math.fround`）で、丸めは `trunc(x + 0.5)`（仕様の round と有効な入力では同じ）。
+   インデックス（TRIANGLES / INDICES）は EXT と同じデコーダ（ヘッダ 0xe1 / 0xd1。KHR の仕様は v1 だけだが、リファレンスと同じく
+   0xe0 / 0xd0 も受け付ける）。validate.js では KHR の圧縮データの範囲を EXT と同様に検査し、同じ bufferView / buffer に EXT と KHR が
+   両方あれば `GltfValidationError`（KHR の Exclusions）。
+   検証: `test/meshopt-khr-vectors.js` の 26 本（v1 の全制御モード・チャンネルモード 0 / 1 / 2（回転あり）・1 ビットのグループ・複数ブロック、
+   COLOR の 8 / 16 ビット、v1 上の既存 3 フィルタ、インデックス）と既存の EXT の 5 本（KHR でもデコードできる）がバイト一致。
+   meshoptimizer の npm 版（1.3.0）のエンコーダでのランダムテスト 400 ケース（stride 4〜256、v0 / v1、level 0〜3）と、
+   Khronos の MeshoptCubeTest（glTF-Meshopt、KHR。v0 / v1 と全フィルタ）の全 60 bufferView が npm 版のデコーダとバイト一致。
+   拡張の JSON の制約（`bufferView.byteLength = byteStride × count`、フィルタごとの byteStride、TRIANGLES の count が 3 の倍数、
+   fallback buffer を参照してよいのは拡張付きの bufferView だけ、など）は EXT / KHR とも validate.js では見ておらず、デコード時に
+   食い違えば `DataUnavailableError`（警告してスキップ）になる。設計判断 19 の方針なら `GltfValidationError` にすべき所で、未対応。
 16. **ノードアニメーションは UsdSkel で書く（既定）。** ユーザーの実機ビューア（AR Quick Look 系）で、xformOp の timeSamples は
    どの書き方（double/float、行列、instancing の有無、USDC）でも再生されず、同じ動きを剛体スケルトンにしたものは再生された。
    Apple の見本（toy_drummer / hummingbird）もスケルトンのみ。usdzconvert の `bindRigidDeformation` と同じ方式

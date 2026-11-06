@@ -235,6 +235,10 @@ export function validateDocument(json, limits) {
   buffers.forEach((b, i) => {
     const where = `buffer ${i}`;
     if (!isIndex(b?.byteLength)) fail(`${where}: byteLength must be a non-negative integer`);
+    // KHR_meshopt_compression § Exclusions: not on a buffer that also uses EXT_meshopt_compression.
+    if (b.extensions?.KHR_meshopt_compression && b.extensions?.EXT_meshopt_compression) {
+      fail(`${where}: KHR_meshopt_compression and EXT_meshopt_compression must not be used together`);
+    }
   });
 
   // Buffer views
@@ -249,12 +253,17 @@ export function validateDocument(json, limits) {
     if (bv.byteStride !== undefined && !(Number.isInteger(bv.byteStride) && bv.byteStride >= 4 && bv.byteStride <= 252 && bv.byteStride % 4 === 0)) {
       fail(`${where}: byteStride ${bv.byteStride} is not a multiple of 4 in 4..252`);
     }
-    const mo = bv.extensions?.EXT_meshopt_compression;
-    if (mo) {
-      const src = ref(mo.buffer, buffers, "EXT_meshopt_compression buffer", where);
-      const moOffset = nonNegInt(mo.byteOffset, "EXT_meshopt_compression byteOffset", where);
+    // KHR_meshopt_compression § Exclusions: not on a bufferView that also uses EXT_meshopt_compression.
+    if (bv.extensions?.KHR_meshopt_compression && bv.extensions?.EXT_meshopt_compression) {
+      fail(`${where}: KHR_meshopt_compression and EXT_meshopt_compression must not be used together`);
+    }
+    for (const name of ["EXT_meshopt_compression", "KHR_meshopt_compression"]) {
+      const mo = bv.extensions?.[name];
+      if (!mo) continue;
+      const src = ref(mo.buffer, buffers, `${name} buffer`, where);
+      const moOffset = nonNegInt(mo.byteOffset, `${name} byteOffset`, where);
       if (!isIndex(mo.byteLength) || moOffset + mo.byteLength > src.byteLength) {
-        fail(`Invalid bufferView range: ${where} EXT_meshopt_compression data exceeds buffer ${mo.buffer}`);
+        fail(`Invalid bufferView range: ${where} ${name} data exceeds buffer ${mo.buffer}`);
       }
     }
   });

@@ -199,7 +199,7 @@ export class GltfAsset {
   readonly json: GltfJson;
   readonly bin: Uint8Array | null;
   readonly limits: Readonly<Limits>;
-  /** Raw bytes of a bufferView (decompressed if it uses EXT_meshopt_compression). */
+  /** Raw bytes of a bufferView (decompressed if it uses EXT_ / KHR_meshopt_compression). */
   bufferViewBytes(index: number): Uint8Array;
   /** Decode an accessor. Throws `DataUnavailableError` if its bytes are not readable. */
   accessor(index: number): AccessorData;
