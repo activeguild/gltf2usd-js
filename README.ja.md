@@ -212,6 +212,7 @@ const usdz: Uint8Array = toUsdz(bytes, options);
 - **メッシュ:** 属性の型と要素数、番号（`TEXCOORD_0`、`TEXCOORD_1`、…）、JOINTS / WEIGHTS の対、モードごとに必要な要素数、インデックスの予約値
 - **参照:** ノード・メッシュ・スキン・アニメーションの間の参照。ノードの階層に循環がないこと
 - **EXT_mesh_gpu_instancing の属性**
+- **EXT_ / KHR_meshopt_compression の設定:** mode・filter・`byteStride`・`count` が拡張の規則に合うか（`bufferView.byteLength = byteStride × count` など）。fallback buffer を使えるのは圧縮されたバッファビューだけ
 
 見た目だけのデータの問題（テクスチャ・ライト・バリアントが見つからないなど）は警告にとどめ、モデルは変換します。
 

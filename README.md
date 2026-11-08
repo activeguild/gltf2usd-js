@@ -212,6 +212,7 @@ Before converting, the input is checked against the glTF 2.0 specification. An i
 - **Meshes:** attribute types and counts, set numbering (`TEXCOORD_0`, `TEXCOORD_1`, …), JOINTS / WEIGHTS pairs, the element count required by each primitive mode, and reserved index values
 - **References:** between nodes, meshes, skins and animations; the node hierarchy must not contain cycles
 - **EXT_mesh_gpu_instancing attributes**
+- **EXT_ / KHR_meshopt_compression settings:** mode, filter, `byteStride` and `count` must fit the extension's rules (for example `bufferView.byteLength = byteStride × count`), and fallback buffers may only be used by compressed buffer views
 
 Problems in purely visual data (a missing texture, light or variant) are reported as warnings instead, and the model still converts.
 
