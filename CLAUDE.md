@@ -61,14 +61,14 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
   テクスチャ参照、UsdSkel: SkelBindingAPI / SkelRoot 配下 / ジョイント順 / jointIndices の範囲 / BlendShape の要素数）
 - `usdz-reader.js`: zip の central directory を読む
 - `server.js`: 依存ゼロの静的サーバ
-- three.js（0.170.0）は import map で jsDelivr から読む。デモにだけ許される依存で、`src/` には入れない
-- 左の GLTFLoader には three.js の MeshoptDecoder と DRACOLoader（Google の WASM デコーダ、同じ three.js 0.170.0 の
+- three.js（0.187.0）は import map で jsDelivr から読む。デモにだけ許される依存で、`src/` には入れない
+- 左の GLTFLoader には three.js の MeshoptDecoder と DRACOLoader（Google の WASM デコーダ、同じ three.js 0.187.0 の
   `examples/jsm/libs/draco/gltf/`）を渡している。右（変換結果）は `src/meshopt.js` / `src/draco.js` を使うので、左右の比較が検証になる
-- three.js 0.170.0 の GLTFLoader は KHR_meshopt_compression を知らない（EXT のみ）ので、KHR の meshopt ファイルは左に表示できない
-  （MeshoptCubeTest では fallback buffer を読もうとして「Invalid typed array length」）。右は表示でき、チェックもすべて通ることを確認済み。
-  左で比べるには three.js の更新が要る
-- **GLTFLoader の KHR_texture_transform は仕様とずれる**（S·R の順で合成するため、非一様 scale + rotation で崩れる）。
-  `app.js` の `fixTextureTransforms()` で仕様どおりの行列に直してから左側に表示している
+- three.js を 0.170.0 から 0.187.0 に上げたのは KHR_meshopt_compression のため（issue #23）。0.170.0 の GLTFLoader は EXT しか知らず、
+  MeshoptCubeTest などは fallback buffer を読もうとして「Invalid typed array length」で左に表示できなかった。
+  0.187.0 の GLTFLoader は KHR_meshopt_compression を扱い、同梱の MeshoptDecoder も頂点コーデック v1 と COLOR フィルタを持つ
+- **KHR_texture_transform**: 0.170.0 の GLTFLoader は S·R の順で合成して仕様（T·R·S）とずれたので、以前は `app.js` の
+  `fixTextureTransforms()` で直していた。0.187.0 の GLTFLoader は rotation があるとき同じ行列を自分で組む（`matrixAutoUpdate = false`）ので削除した
 - **新しい USD 機能を出力したら、`usd-preview.js` / `checks.js` もそれを読めるように更新する**
   （`UsdTransform2d`、`primvars:st1..3`、internal reference、xformOp の timeSamples、UsdSkel は対応済み）
 - variantSet があると選択 UI が出る。右は選択した variant の opinion を合成して再構築、左は GLTFLoader の parser で
