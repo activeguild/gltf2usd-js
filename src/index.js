@@ -40,6 +40,9 @@ export function gltfToUsda(asset, options = {}) {
  * options.animationMode: "skeleton" (default) writes node animation as UsdSkel
  *   (animated subtrees become joints, meshes bound rigidly), which AR Quick Look-style
  *   viewers play; "xform" writes time-sampled translate / orient / scale xformOps.
+ * options.doubleSided: "attribute" (default) writes double-sided materials as USD
+ *   doubleSided, which Quick Look / AR Quick Look ignore; "faces" instead adds a reversed
+ *   copy of each triangle (normals per face corner, negated on the back faces).
  * options.limits: resource limits, e.g. { maxInputBytes, maxAccessorValues, maxNodeDepth }
  *   (defaults in DEFAULT_LIMITS; Infinity disables one). maxInputBytes applies to GLB / glTF
  *   bytes, to JSON text (its UTF-8 size) and to each external buffer from options.resources;

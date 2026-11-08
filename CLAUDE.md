@@ -131,7 +131,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
 
 ### 未対応（既知）
 - マテリアルがあるメッシュの頂点カラー RGB（`displayColor` は書くがマテリアルに掛けない。glTF は baseColor に掛ける）
-- Quick Look での両面表示（`doubleSided` は書くが Quick Look は無視する。警告。設計判断 27）
+- Quick Look での両面表示（既定では `doubleSided` を書くが Quick Look は無視する。警告。`doubleSided: "faces"` で裏面を書けるが実機未確認。設計判断 27）
 - 頂点アルファ × baseColorTexture のアルファ（UsdPreviewSurface では掛けられない。テクスチャのアルファを使い警告。テクスチャにアルファチャンネルがなければ掛け算は不要なので正確に表せる。設計判断 26）
 - ZIP64（4 GiB を超える USDZ は `UsdzLimitError`）
 - KHR_materials_volume / specular / sheen など（警告）
@@ -357,8 +357,17 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
    （この修正だけではラベル板は出なかった）。Quick Look がアルファのない画像の `a` を 0 と読むかは未確認。
 27. **doubleSided は USD の `doubleSided` に書き、Quick Look では効かないと警告する。** Mac の Finder の Quick Look は `doubleSided = 1` を無視して
    表面だけを描く（ユーザー確認: MeshoptCubeTest のラベル板は表面が −Z 向きで、そのままでは消え、面の向きと法線だけを +Z に反転すると表示された）。
-   裏面を複製して書く案（primvar・スキン・モーフも複製が要る）は、ユーザーの判断でいったん見送り。必要ならオプションにする。
    警告は文言が同じなので変換ごとに 1 回（`ctx.warn` の重複排除）。Khronos の結合テストでは 3 モデルで出る。
+   **issue #20: オプション `doubleSided: "faces"`（CLI `--double-sided-faces`）で裏面を書く。既定は従来どおり `"attribute"`**（ユーザーの判断。
+   面数が倍になり、doubleSided を尊重するビューアとの兼ね合いもあるため）。方式もユーザーの選択で「点は共有、法線だけ faceVarying」:
+   `faceVertexIndices` の後ろに各三角形を (a, c, b) で足し、法線は面の角ごと（NORMAL があれば点の法線を角に展開、なければ flat）で、
+   裏面の角は表の同じ角の法線を反転。点と点ごとの primvar（UV・色・displayOpacity・vertexAlphaUV・スキン・BlendShape の offsets）は
+   複製しない。`doubleSided` 属性は書かない（尊重するビューアが両方の面を描いて重なるため）し、Quick Look の警告も出さない。
+   **BlendShape の normalOffsets は faceVarying の法線には効かない**（OpenUSD 26.11 の `UsdSkel.BakeSkinning` で確認。vertex なら効く）ので、
+   NORMAL の差分を持つ morph target があれば警告する。面は形状なので variant ごとに変えられない: バインドされうるマテリアル
+   （`primitiveMaterials()`、自前のマテリアルがなければ既定マテリアル = 片面を含む）のどれかが両面なら裏面を書き、全部でなければ警告。
+   既定の出力はバイト単位で変わらない（fixtures で確認）。`test/double-sided.js`。**Quick Look で実際に裏面が見えるかは未確認**
+   （MeshoptCubeTest を `--double-sided-faces` で変換して確かめる）。
 
 ## OpenUSD バリデータに指摘されて直した点（再発注意）
 

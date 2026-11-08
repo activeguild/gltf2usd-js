@@ -88,6 +88,8 @@ export function gltfToStage(asset, options = {}) {
     warn: makeWarn(options.onWarning),
     meshPrimPaths: new Map(), // "mesh:primitive" → USD paths of its Mesh prims
   };
+  ctx.doubleSidedMode = options.doubleSided ?? "attribute";
+  if (ctx.doubleSidedMode !== "attribute" && ctx.doubleSidedMode !== "faces") throw new Error(`Unknown doubleSided "${ctx.doubleSidedMode}"`);
   reportUnsupported(ctx);
   Object.assign(ctx, planVertexAlpha(ctx));
   ctx.animation = evaluateAnimation(ctx, options.animation ?? 0);
@@ -601,13 +603,22 @@ function buildMeshPrimData(ctx, parent, prim, name, skel, gltfMesh) {
   const mesh = parent.child(new Prim("Mesh", name, {
     metadata: apiSchemas.length ? { "prepend apiSchemas": apiSchemas } : {},
   }));
+  // doubleSided: "faces" adds a reversed copy of each triangle (see backFaceTopology).
+  const backFaces = ctx.doubleSidedMode === "faces" && writesBackFaces(ctx, prim, name);
   mesh.attr("token", "subdivisionScheme", "none", { uniform: true });
-  mesh.attr("int[]", "faceVertexCounts", new Array(triCount).fill(3));
-  mesh.attr("int[]", "faceVertexIndices", indices);
+  mesh.attr("int[]", "faceVertexCounts", new Array(backFaces ? triCount * 2 : triCount).fill(3));
+  mesh.attr("int[]", "faceVertexIndices", backFaces ? backFaceTopology(indices) : indices);
   mesh.attr("point3f[]", "points", pos.data);
 
   const vertex = { interpolation: "vertex" };
-  if (attrs.NORMAL !== undefined) {
+  if (backFaces) {
+    const normals = attrs.NORMAL !== undefined ? cornerNormals(ctx.asset.accessor(attrs.NORMAL).data, indices) : flatNormals(pos.data, indices);
+    mesh.attr("normal3f[]", "normals", withBackNormals(normals), { metadata: { interpolation: "faceVarying" } });
+    // UsdSkel applies BlendShape normalOffsets to vertex normals only (checked with OpenUSD 26.11).
+    if (skel && prim.targets?.some((t) => t.NORMAL !== undefined)) {
+      ctx.warn(`Mesh "${name}": with doubleSided "faces" the normals are per face corner, so morph target NORMAL deltas are not applied`);
+    }
+  } else if (attrs.NORMAL !== undefined) {
     mesh.attr("normal3f[]", "normals", ctx.asset.accessor(attrs.NORMAL).data, { metadata: vertex });
   } else {
     // glTF: without NORMAL, clients must use flat normals (one per triangle corner here).
@@ -669,7 +680,7 @@ function buildMeshPrimData(ctx, parent, prim, name, skel, gltfMesh) {
     // Variant-mapped primitives get their binding from the variantSet only: a binding
     // authored here (a local opinion) would be stronger than any variant's.
     if (!variantMapped) mesh.rel("material:binding", `/Root/Materials/${uniqueMaterialName(ctx, prim.material)}`);
-    if (ctx.json.materials[prim.material].doubleSided) {
+    if (ctx.json.materials[prim.material].doubleSided && ctx.doubleSidedMode !== "faces") {
       mesh.attr("bool", "doubleSided", true, { uniform: true });
       // Quick Look / AR Quick Look draw front faces only, whatever doubleSided says (tested on
       // device: Khronos MeshoptCubeTest's label boards face away and vanish). Same text → one warning.
@@ -800,6 +811,56 @@ function vertexAlphaRampFile(ctx, step = null) {
   ctx.files.push({ name, bytes });
   ctx.rampFiles.set(key, name);
   return name;
+}
+
+/**
+ * doubleSided: "faces": whether a primitive gets back faces. Quick Look / AR Quick Look ignore
+ * USD doubleSided and draw front faces only, so a double-sided material is drawn from behind by a
+ * reversed copy of each triangle instead (and doubleSided is not written: viewers honoring it would
+ * draw both copies). The faces are geometry, so they cannot change with KHR_materials_variants: the
+ * primitive gets them when any material it can be bound to is double-sided (warning if not all are).
+ */
+function writesBackFaces(ctx, prim, name) {
+  const materials = ctx.json.materials || [];
+  const sides = primitiveMaterials(prim).map((m) => !!materials[m]?.doubleSided);
+  // Without its own material the primitive uses glTF's default material, which is single-sided.
+  if (!materials[prim.material]) sides.push(false);
+  if (!sides.includes(true)) return false;
+  if (sides.includes(false)) {
+    ctx.warn(`Mesh "${name}": only some of its material variants are double-sided; back faces are written for all of them`);
+  }
+  return true;
+}
+
+/**
+ * Triangles followed by the same triangles reversed (a, c, b). The back faces share the points,
+ * so every per-point primvar (UVs, colors, skinning, BlendShape offsets) applies to both sides.
+ */
+function backFaceTopology(indices) {
+  const out = indices.slice();
+  for (let t = 0; t < indices.length; t += 3) out.push(indices[t], indices[t + 2], indices[t + 1]);
+  return out;
+}
+
+/** Per-point normals → per-corner normals (faceVarying) of the given triangles. */
+function cornerNormals(normals, indices) {
+  const out = new Array(indices.length * 3);
+  for (let k = 0; k < indices.length; k++) {
+    for (let c = 0; c < 3; c++) out[k * 3 + c] = normals[indices[k] * 3 + c];
+  }
+  return out;
+}
+
+/**
+ * Per-corner normals of the front faces → those of front and back faces (backFaceTopology order):
+ * each back face corner (a, c, b) gets the negated normal of the same corner of the front face.
+ */
+function withBackNormals(front) {
+  const out = front.slice();
+  for (let t = 0; t < front.length; t += 9) {
+    for (const k of [0, 2, 1]) for (let c = 0; c < 3; c++) out.push(-front[t + k * 3 + c] || 0);
+  }
+  return out;
 }
 
 /** Per-corner normals of each triangle (faceVarying), for primitives without NORMAL. */

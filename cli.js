@@ -3,11 +3,16 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { toUsda, toUsdz } from "./src/index.js";
 
-const USAGE = `usage: glb2usd <in.glb|in.gltf> <out.usdz|out.usda>
+const USAGE = `usage: glb2usd [--double-sided-faces] <in.glb|in.gltf> <out.usdz|out.usda>
 
 Converts glTF 2.0 (.glb, or .gltf with its external files next to it) to USDZ, or to
-USDA text when the output name ends in .usda. Warnings about dropped data go to stderr.`;
-const args = process.argv.slice(2);
+USDA text when the output name ends in .usda. Warnings about dropped data go to stderr.
+
+  --double-sided-faces  write back faces for double-sided materials (Quick Look ignores
+                        USD doubleSided)`;
+const allArgs = process.argv.slice(2);
+const doubleSidedFaces = allArgs.includes("--double-sided-faces");
+const args = allArgs.filter((a) => a !== "--double-sided-faces");
 if (args.includes("--help") || args.includes("-h")) {
   console.log(USAGE);
   process.exit(0);
@@ -37,7 +42,11 @@ const resources = (uri) => {
   }
 };
 
-const options = { resources, onWarning: (msg) => console.warn(`warning: ${msg}`) };
+const options = {
+  resources,
+  onWarning: (msg) => console.warn(`warning: ${msg}`),
+  ...(doubleSidedFaces ? { doubleSided: "faces" } : {}),
+};
 const data = readFileSync(input);
 let out;
 try {
