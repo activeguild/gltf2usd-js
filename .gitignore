@@ -3,6 +3,7 @@ test/cube.glb
 test/features.glb
 test/animated.glb
 test/skinned.glb
+test/double-sided.glb
 *.usdz
 *.usda
 !test/fixtures/*

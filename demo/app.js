@@ -7,7 +7,7 @@ import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
 
 import { toUsdzAsync, parseGltf, resolveResource } from "../src/index.js";
-import { buildAnimatedGlb, buildCubeGlb, buildCubeGltf, buildFeatureGlb, buildSkinnedGlb } from "../test/cube-glb.js";
+import { buildAnimatedGlb, buildCubeGlb, buildCubeGltf, buildDoubleSidedGlb, buildFeatureGlb, buildSkinnedGlb } from "../test/cube-glb.js";
 import { readUsdz } from "./usdz-reader.js";
 import { parseUsda, traverse, primReferences } from "./usda-parser.js";
 import { runChecks } from "./checks.js";
@@ -231,6 +231,9 @@ $("sample").addEventListener("click", () => run(buildCubeGlb(), "sample-cube.glb
 $("sample-features").addEventListener("click", () => run(buildFeatureGlb(), "sample-features.glb"));
 $("sample-anim").addEventListener("click", () => run(buildAnimatedGlb(), "sample-animated.glb"));
 $("sample-skin").addEventListener("click", () => run(buildSkinnedGlb(), "sample-skinned.glb"));
+$("sample-double").addEventListener("click", () => run(buildDoubleSidedGlb(), "sample-double-sided.glb"));
+// options.doubleSided: convert the current input again with the new setting.
+$("double-faces").addEventListener("change", () => { if (lastInput) run(...lastInput); });
 $("sample-gltf").addEventListener("click", () => {
   const { gltf, resources } = buildCubeGltf();
   run(new TextEncoder().encode(gltf), "cube.gltf", new Map(Object.entries(resources)));
@@ -269,8 +272,10 @@ async function loadFiles(files) {
 let urls = [];
 let usdPreview = null;
 let runId = 0; // a newer run (another file or sample) makes an older, still-running one stop
+let lastInput = null; // [glb, name, resources] of the latest run, for re-converting with other options
 
 async function run(glb, name, resources = new Map()) {
+  lastInput = [glb, name, resources];
   const id = ++runId;
   const stale = () => id !== runId;
   const extra = resources.size ? ` + ${resources.size} ファイル` : "";
@@ -292,7 +297,11 @@ async function run(glb, name, resources = new Map()) {
   try {
     const t0 = performance.now();
     // Async: WebP textures (EXT_texture_webp) are converted to PNG / JPEG by the browser.
-    usdz = await toUsdzAsync(glb, { resources, onWarning: (msg) => converterWarnings.push(msg) });
+    usdz = await toUsdzAsync(glb, {
+      resources,
+      onWarning: (msg) => converterWarnings.push(msg),
+      doubleSided: $("double-faces").checked ? "faces" : "attribute",
+    });
     ms = performance.now() - t0;
   } catch (err) {
     if (stale()) return;

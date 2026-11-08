@@ -35,7 +35,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
 | `src/index.d.ts` | 公開 API の型定義（手書き） | `src/index.js` の export を変えたら必ず合わせる。export 名の一致は `test/run.js`、型は `npm run test:types`（`test/types.ts`） |
 | `src/index.js`| `toUsda()`, `toUsdz()`, `toUsdaAsync()`, `toUsdzAsync()`, `gltfToUsda()` | 公開 API。GLB と `.gltf` を受け付ける。旧名 `glbToUsda` などは同じ関数の別名（設計判断 24）。Async 版は WebP などの画像を変換してから変換する |
 | `cli.js`      | `node cli.js in.glb\|in.gltf out.usdz\|out.usda`（`--help` / `--version`） | `.gltf` の外部ファイルは同じフォルダ以下からのみ読む。npm の bin は `glb2usd` |
-| `test/cube-glb.js` | テスト用 GLB をメモリ上で生成（Node / ブラウザ共用） | `buildCubeGlb()`（段階 1）、`buildFeatureGlb()`（段階 2）、`buildAnimatedGlb()`（段階 3）、`buildSkinnedGlb()`（段階 4）、`buildCubeGltf()` |
+| `test/cube-glb.js` | テスト用 GLB をメモリ上で生成（Node / ブラウザ共用） | `buildCubeGlb()`（段階 1）、`buildFeatureGlb()`（段階 2）、`buildAnimatedGlb()`（段階 3）、`buildSkinnedGlb()`（段階 4）、`buildDoubleSidedGlb()`（両面マテリアル、issue #20）、`buildCubeGltf()` |
 | `test/make-glb.js` | 上記を `test/*.glb` と `test/gltf/`（外部ファイル付き .gltf）に書き出す | |
 | `test/png.js` | テスト画像用の小さな PNG エンコーダ | |
 | `test/meshopt-vectors.js` | meshopt のテストベクトル（meshoptimizer のエンコーダで生成した入力とリファレンス出力） | 依存なしでデコーダを検証するため |
@@ -71,6 +71,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
   `app.js` の `fixTextureTransforms()` で仕様どおりの行列に直してから左側に表示している
 - **新しい USD 機能を出力したら、`usd-preview.js` / `checks.js` もそれを読めるように更新する**
   （`UsdTransform2d`、`primvars:st1..3`、internal reference、xformOp の timeSamples、UsdSkel は対応済み）
+- 「両面を裏面の面で書く」のチェックで `doubleSided: "faces"` にして今の入力を変換し直す（サンプル「両面マテリアル」で左右を比べる）
 - variantSet があると選択 UI が出る。右は選択した variant の opinion を合成して再構築、左は GLTFLoader の parser で
   KHR_materials_variants の対応どおりにマテリアルを差し替える（option の順 = default + glTF の順）
 - UsdLux は DirectionalLight / PointLight / SpotLight（−Z 向き、強さはそのまま）で表示

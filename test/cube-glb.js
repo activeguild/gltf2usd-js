@@ -312,6 +312,53 @@ export function buildSkinnedGlb() {
   }, bin);
 }
 
+/**
+ * Double-sided materials (issue #20; options.doubleSided):
+ *  - "OpenBox": the cube without its +Z face, double-sided, so its inside is seen through the opening
+ *  - "Board_DoubleSided" / "Board_SingleSided": the cube's −Z face alone (it faces away from a camera
+ *    on +Z, like the label boards of Khronos MeshoptCubeTest); only the double-sided one is drawn from +Z
+ * Quick Look ignores USD doubleSided, so with the default options the open box's inside and the
+ * double-sided board vanish there; doubleSided: "faces" writes their back faces.
+ * @returns {Uint8Array} GLB bytes
+ */
+export function buildDoubleSidedGlb() {
+  const { I } = cubeGeometry();
+  const { bin, views } = cubeBin([
+    new Uint8Array(new Uint16Array(I.slice(6)).buffer), // 5: all faces but +Z
+    new Uint8Array(new Uint16Array(I.slice(6, 12)).buffer), // 6: the −Z face
+    quadrantPng(), // 7
+  ]);
+  const texture = { baseColorTexture: { index: 0 }, metallicFactor: 0, roughnessFactor: 0.7 };
+  return packGlb({
+    asset: { version: "2.0", generator: "test" },
+    scene: 0,
+    scenes: [{ nodes: [0, 1, 2] }],
+    nodes: [
+      { name: "OpenBox", mesh: 0, rotation: [0, 0.258819, 0, 0.9659258] },
+      { name: "Board_DoubleSided", mesh: 1, translation: [1.5, 0, 0.5] },
+      { name: "Board_SingleSided", mesh: 2, translation: [-1.5, 0, 0.5] },
+    ],
+    meshes: [
+      { name: "OpenBox", primitives: [{ attributes: { POSITION: 0, NORMAL: 1, TEXCOORD_0: 2 }, indices: 4, material: 0 }] },
+      { name: "Board_DoubleSided", primitives: [{ attributes: { POSITION: 0, NORMAL: 1, TEXCOORD_0: 2 }, indices: 5, material: 0 }] },
+      { name: "Board_SingleSided", primitives: [{ attributes: { POSITION: 0, NORMAL: 1, TEXCOORD_0: 2 }, indices: 5, material: 1 }] },
+    ],
+    accessors: [
+      ...CUBE_ACCESSORS,
+      { bufferView: 5, componentType: 5123, count: 30, type: "SCALAR" },
+      { bufferView: 6, componentType: 5123, count: 6, type: "SCALAR" },
+    ],
+    bufferViews: views,
+    buffers: [{ byteLength: bin.length }],
+    images: [{ bufferView: 7, mimeType: "image/png", name: "quadrants" }],
+    textures: [{ source: 0 }],
+    materials: [
+      { name: "TwoSided", doubleSided: true, pbrMetallicRoughness: texture },
+      { name: "OneSided", pbrMetallicRoughness: texture },
+    ],
+  }, bin);
+}
+
 const CUBE_ACCESSORS = [
   { bufferView: 0, componentType: 5126, count: 24, type: "VEC3", min: [-0.5, -0.5, -0.5], max: [0.5, 0.5, 0.5] },
   { bufferView: 1, componentType: 5126, count: 24, type: "VEC3" },
