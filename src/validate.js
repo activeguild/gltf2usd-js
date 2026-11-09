@@ -171,6 +171,56 @@ export function checkIndexValues(values, componentType, vertexCount, where) {
     if (v >= vertexCount) throw new GltfValidationError(`${where} value ${i} is ${v}, but POSITION has ${vertexCount} vertices`);
   }
 }
+const MESHOPT_EXTENSIONS = ["EXT_meshopt_compression", "KHR_meshopt_compression"];
+const MESHOPT_MODES = ["ATTRIBUTES", "TRIANGLES", "INDICES"];
+const MESHOPT_FILTERS = {
+  EXT_meshopt_compression: ["NONE", "OCTAHEDRAL", "QUATERNION", "EXPONENTIAL"],
+  KHR_meshopt_compression: ["NONE", "OCTAHEDRAL", "QUATERNION", "EXPONENTIAL", "COLOR"],
+};
+// byteStride each filter allows (both extensions' "the following must hold" lists).
+const MESHOPT_FILTER_STRIDES = {
+  OCTAHEDRAL: { ok: (s) => s === 4 || s === 8, need: "4 or 8" },
+  QUATERNION: { ok: (s) => s === 8, need: "8" },
+  EXPONENTIAL: { ok: (s) => s % 4 === 0, need: "a multiple of 4" },
+  COLOR: { ok: (s) => s === 4 || s === 8, need: "4 or 8" },
+};
+
+/**
+ * The JSON constraints of an EXT_ / KHR_meshopt_compression bufferView extension `mo`
+ * (the byte range of the compressed data is checked by the caller). Without these, a
+ * mismatch would only surface while decoding (DataUnavailableError, skipped with a warning).
+ */
+function checkMeshopt(name, mo, bv, buffers, where, fail) {
+  const w = `${where} ${name}`;
+  if (!MESHOPT_MODES.includes(mo.mode)) fail(`${w}: mode ${JSON.stringify(mo.mode)} must be one of ${MESHOPT_MODES.join(", ")}`);
+  const filter = mo.filter ?? "NONE";
+  if (!MESHOPT_FILTERS[name].includes(filter)) fail(`${w}: filter ${JSON.stringify(mo.filter)} must be one of ${MESHOPT_FILTERS[name].join(", ")}`);
+  const { byteStride: stride, count } = mo;
+  if (!Number.isInteger(stride) || stride < 1) fail(`${w}: byteStride must be a positive integer (got ${JSON.stringify(stride)})`);
+  if (!Number.isInteger(count) || count < 1) fail(`${w}: count must be a positive integer (got ${JSON.stringify(count)})`);
+  if (bv.byteLength !== stride * count) {
+    fail(`${w}: bufferView byteLength ${bv.byteLength} must equal byteStride ${stride} × count ${count} (${stride * count})`);
+  }
+  // EXT only: KHR_meshopt_compression dropped this rule.
+  if (name === "EXT_meshopt_compression" && bv.byteStride !== undefined && bv.byteStride !== stride) {
+    fail(`${w}: byteStride ${stride} must match the bufferView's byteStride ${bv.byteStride}`);
+  }
+  if (mo.mode === "ATTRIBUTES") {
+    // EXT states only "divisible by 4 and <= 256"; KHR adds ">= 4", which 0 < stride already implies.
+    if (stride % 4 || stride > 256) fail(`${w}: ATTRIBUTES needs a byteStride that is a multiple of 4 in 4..256, got ${stride}`);
+  } else {
+    if (stride !== 2 && stride !== 4) fail(`${w}: ${mo.mode} needs byteStride 2 or 4, got ${stride}`);
+    if (filter !== "NONE") fail(`${w}: ${mo.mode} must not use a filter (got ${filter})`);
+    if (mo.mode === "TRIANGLES" && count % 3) fail(`${w}: TRIANGLES needs a count that is a multiple of 3, got ${count}`);
+  }
+  const rule = MESHOPT_FILTER_STRIDES[filter];
+  if (rule && !rule.ok(stride)) fail(`${w}: filter ${filter} needs byteStride ${rule.need}, got ${stride}`);
+  // § Fallback buffers: the compressed data must not come from a fallback buffer.
+  if (buffers[mo.buffer].extensions?.[name]?.fallback) {
+    fail(`${w}: buffer ${mo.buffer} is a fallback buffer and must not hold the compressed data`);
+  }
+}
+
 // Top-level arrays whose elements the converter reads as objects.
 const OBJECT_ARRAYS = ["accessors", "animations", "buffers", "bufferViews", "cameras", "images", "materials",
   "meshes", "nodes", "samplers", "scenes", "skins", "textures"];
@@ -257,14 +307,20 @@ export function validateDocument(json, limits) {
     if (bv.extensions?.KHR_meshopt_compression && bv.extensions?.EXT_meshopt_compression) {
       fail(`${where}: KHR_meshopt_compression and EXT_meshopt_compression must not be used together`);
     }
-    for (const name of ["EXT_meshopt_compression", "KHR_meshopt_compression"]) {
+    for (const name of MESHOPT_EXTENSIONS) {
+      // § Fallback buffers: only bufferViews that carry the extension may reference a fallback buffer.
+      if (buffer.extensions?.[name]?.fallback && bv.extensions?.[name] === undefined) {
+        fail(`${where}: buffer ${bv.buffer} is a ${name} fallback buffer, so only bufferViews with ${name} may reference it`);
+      }
       const mo = bv.extensions?.[name];
-      if (!mo) continue;
+      if (mo === undefined) continue;
+      if (!isObject(mo)) fail(`${where}: ${name} must be an object`);
       const src = ref(mo.buffer, buffers, `${name} buffer`, where);
       const moOffset = nonNegInt(mo.byteOffset, `${name} byteOffset`, where);
       if (!isIndex(mo.byteLength) || moOffset + mo.byteLength > src.byteLength) {
         fail(`Invalid bufferView range: ${where} ${name} data exceeds buffer ${mo.buffer}`);
       }
+      checkMeshopt(name, mo, bv, buffers, where, fail);
     }
   });
 

@@ -211,9 +211,16 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
    COLOR の 8 / 16 ビット、v1 上の既存 3 フィルタ、インデックス）と既存の EXT の 5 本（KHR でもデコードできる）がバイト一致。
    meshoptimizer の npm 版（1.3.0）のエンコーダでのランダムテスト 400 ケース（stride 4〜256、v0 / v1、level 0〜3）と、
    Khronos の MeshoptCubeTest（glTF-Meshopt、KHR。v0 / v1 と全フィルタ）の全 60 bufferView が npm 版のデコーダとバイト一致。
-   拡張の JSON の制約（`bufferView.byteLength = byteStride × count`、フィルタごとの byteStride、TRIANGLES の count が 3 の倍数、
-   fallback buffer を参照してよいのは拡張付きの bufferView だけ、など）は EXT / KHR とも validate.js では見ておらず、デコード時に
-   食い違えば `DataUnavailableError`（警告してスキップ）になる。設計判断 19 の方針なら `GltfValidationError` にすべき所で、未対応。
+   拡張の JSON の制約は設計判断 19 の方針どおり、デコード前に validate.js の `checkMeshopt()` で検査して `GltfValidationError` にする
+   （issue #22）。両拡張の「the following must hold」の箇条書きどおり: 拡張はオブジェクト、mode は 3 種、filter は EXT が 4 種・KHR は COLOR を
+   足した 5 種、byteStride / count は正の整数、`bufferView.byteLength = byteStride × count`、ATTRIBUTES は byteStride が 4 の倍数で 4..256、
+   TRIANGLES / INDICES は byteStride 2 か 4 でフィルタなし、TRIANGLES の count は 3 の倍数、OCTAHEDRAL / COLOR は byteStride 4 か 8、
+   QUATERNION は 8、EXPONENTIAL は 4 の倍数。親 bufferView の byteStride と拡張の byteStride の一致は EXT にだけある規則なので EXT だけ検査する
+   （KHR の仕様からは消えている）。fallback buffer（`fallback` が真）は、その拡張を持つ bufferView からしか参照できず、拡張の `buffer`
+   （圧縮データ）にもできない（両仕様とも同じ 2 項目。EXT の fallback buffer を KHR だけの bufferView が参照するのも不可）。
+   ビット列の中身の食い違い（壊れた列など）は従来どおりデコード時の `DataUnavailableError`（警告してスキップ）。
+   確認: Khronos の MeshoptCubeTest（KHR）/ BrainStem-meshopt（EXT）と、gltf-transform 4.3.0（meshoptimizer 1.0.1）で Khronos 13 モデルを
+   `meshopt({ level: "medium" | "high" })` した 26 ファイルに誤検出なし。テストは `test/validation.js`。
 16. **ノードアニメーションは UsdSkel で書く（既定）。** ユーザーの実機ビューア（AR Quick Look 系）で、xformOp の timeSamples は
    どの書き方（double/float、行列、instancing の有無、USDC）でも再生されず、同じ動きを剛体スケルトンにしたものは再生された。
    Apple の見本（toy_drummer / hummingbird）もスケルトンのみ。usdzconvert の `bindRigidDeformation` と同じ方式

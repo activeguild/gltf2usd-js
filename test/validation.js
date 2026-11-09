@@ -379,6 +379,85 @@ assert(DEFAULT_LIMITS.maxNodeDepth === 1024 && Object.isFrozen(DEFAULT_LIMITS), 
   }
 }
 
+// ---- EXT_ / KHR_meshopt_compression JSON constraints (checked before decoding) ----
+{
+  // The document only has to pass validate.js: the bufferViews below are not used by any
+  // accessor, so nothing is decoded. Buffer 0 is the GLB BIN chunk (the triangle's data),
+  // buffer 1 holds "compressed" bytes, buffer 2 is a data-less fallback.
+  const doc = (name, ext, view = {}, fallback = true) => {
+    const j = clone(json);
+    j.extensionsUsed = [name];
+    j.buffers.push({ byteLength: 64, uri: "data:application/octet-stream;base64," + btoa("\0".repeat(64)) });
+    // Without the fallback flag the uncompressed data has to be present.
+    j.buffers.push(fallback ? { byteLength: 4096, extensions: { [name]: { fallback: true } } }
+      : { byteLength: 4096, uri: "data:application/octet-stream;base64," + btoa("\0".repeat(4096)) });
+    if (typeof ext !== "object") {
+      j.bufferViews.push({ buffer: 2, byteLength: 48, extensions: { [name]: ext } });
+      return makeGlb(j, bin);
+    }
+    const e = { buffer: 1, byteLength: 32, byteStride: 12, count: 4, mode: "ATTRIBUTES", ...ext };
+    for (const k of Object.keys(e)) if (e[k] === undefined) delete e[k];
+    j.bufferViews.push({ buffer: 2, byteLength: e.byteStride * e.count, ...view, extensions: { [name]: e } });
+    return makeGlb(j, bin);
+  };
+  for (const name of ["EXT_meshopt_compression", "KHR_meshopt_compression"]) {
+    const v = `bufferView \\d+ ${name}`;
+    accepts(doc(name, {}), `${name}: valid ATTRIBUTES`);
+    accepts(doc(name, { byteStride: 256, count: 1 }), `${name}: ATTRIBUTES byteStride 256`);
+    accepts(doc(name, { byteStride: 2, count: 6, mode: "TRIANGLES" }), `${name}: TRIANGLES byteStride 2`);
+    accepts(doc(name, { byteStride: 4, count: 5, mode: "INDICES", filter: "NONE" }), `${name}: INDICES with filter NONE`);
+    accepts(doc(name, { byteStride: 8, filter: "OCTAHEDRAL" }), `${name}: OCTAHEDRAL byteStride 8`);
+    accepts(doc(name, { byteStride: 8, filter: "QUATERNION" }), `${name}: QUATERNION byteStride 8`);
+    accepts(doc(name, { byteStride: 12, filter: "EXPONENTIAL" }), `${name}: EXPONENTIAL byteStride 12`);
+    accepts(doc(name, {}, {}, false), `${name}: uncompressed copy in a buffer without the fallback flag`);
+
+    const bad = (ext, re, label, view) => rejects(doc(name, ext, view), new RegExp(`${v}: ${re}`), `${name}: ${label}`);
+    bad({ mode: "QUADS" }, `mode "QUADS" must be one of ATTRIBUTES, TRIANGLES, INDICES`, "unknown mode");
+    bad({ mode: undefined }, `mode undefined must be one of`, "missing mode");
+    bad({ filter: "ZIGZAG" }, `filter "ZIGZAG" must be one of`, "unknown filter");
+    bad({ byteStride: 1.5, count: 2 }, `byteStride must be a positive integer \\(got 1.5\\)`, "fractional byteStride");
+    bad({ byteStride: 0 }, `byteStride must be a positive integer \\(got 0\\)`, "byteStride 0", { byteLength: 4 });
+    bad({ count: 0 }, `count must be a positive integer \\(got 0\\)`, "count 0", { byteLength: 4 });
+    bad({ count: "4" }, `count must be a positive integer \\(got "4"\\)`, "count as a string", { byteLength: 48 });
+    bad({}, `bufferView byteLength 52 must equal byteStride 12 × count 4 \\(48\\)`, "byteLength ≠ byteStride × count", { byteLength: 52 });
+    bad({ byteStride: 6 }, `ATTRIBUTES needs a byteStride that is a multiple of 4 in 4..256, got 6`, "ATTRIBUTES byteStride 6");
+    bad({ byteStride: 260, count: 1 }, `ATTRIBUTES needs a byteStride that is a multiple of 4 in 4..256, got 260`, "ATTRIBUTES byteStride 260");
+    bad({ byteStride: 2, count: 4, mode: "TRIANGLES" }, `TRIANGLES needs a count that is a multiple of 3, got 4`, "TRIANGLES count 4");
+    bad({ byteStride: 8, count: 3, mode: "TRIANGLES" }, `TRIANGLES needs byteStride 2 or 4, got 8`, "TRIANGLES byteStride 8");
+    bad({ byteStride: 1, count: 4, mode: "INDICES" }, `INDICES needs byteStride 2 or 4, got 1`, "INDICES byteStride 1");
+    bad({ byteStride: 4, count: 3, mode: "TRIANGLES", filter: "EXPONENTIAL" }, `TRIANGLES must not use a filter \\(got EXPONENTIAL\\)`, "TRIANGLES with a filter");
+    bad({ byteStride: 2, count: 4, mode: "INDICES", filter: "OCTAHEDRAL" }, `INDICES must not use a filter \\(got OCTAHEDRAL\\)`, "INDICES with a filter");
+    bad({ byteStride: 12, filter: "OCTAHEDRAL" }, `filter OCTAHEDRAL needs byteStride 4 or 8, got 12`, "OCTAHEDRAL byteStride 12");
+    bad({ byteStride: 4, filter: "QUATERNION" }, `filter QUATERNION needs byteStride 8, got 4`, "QUATERNION byteStride 4");
+    bad({ buffer: 2 }, `buffer 2 is a fallback buffer and must not hold the compressed data`, "compressed data in the fallback buffer");
+    rejects(doc(name, "x"), new RegExp(`bufferView \\d+: ${name} must be an object`), `${name}: extension is a string`);
+    // A fallback buffer referenced by a bufferView without the extension.
+    {
+      const j = clone(json);
+      j.buffers.push({ byteLength: 64, extensions: { [name]: { fallback: true } } });
+      j.bufferViews.push({ buffer: 1, byteLength: 12 });
+      rejects(makeGlb(j, bin), new RegExp(`bufferView \\d+: buffer 1 is a ${name} fallback buffer, so only bufferViews with ${name} may reference it`), `${name}: plain bufferView on a fallback buffer`);
+    }
+  }
+  // COLOR is a KHR_meshopt_compression filter (byteStride 4 or 8).
+  accepts(doc("KHR_meshopt_compression", { byteStride: 4, filter: "COLOR" }), "KHR: COLOR byteStride 4");
+  rejects(doc("KHR_meshopt_compression", { byteStride: 12, filter: "COLOR" }), /KHR_meshopt_compression: filter COLOR needs byteStride 4 or 8, got 12/, "KHR: COLOR byteStride 12");
+  rejects(doc("EXT_meshopt_compression", { byteStride: 4, filter: "COLOR" }), /EXT_meshopt_compression: filter "COLOR" must be one of NONE, OCTAHEDRAL, QUATERNION, EXPONENTIAL$/, "EXT: COLOR filter");
+  // The parent bufferView's byteStride must match the extension's (EXT only; KHR dropped the rule).
+  accepts(doc("EXT_meshopt_compression", {}, { byteStride: 12 }), "EXT: matching parent byteStride");
+  rejects(doc("EXT_meshopt_compression", {}, { byteStride: 16 }), /EXT_meshopt_compression: byteStride 12 must match the bufferView's byteStride 16/, "EXT: parent byteStride differs");
+  accepts(doc("KHR_meshopt_compression", {}, { byteStride: 16 }), "KHR: parent byteStride may differ");
+  // A fallback buffer of one extension referenced by a bufferView that only uses the other.
+  {
+    const j = clone(json);
+    j.extensionsUsed = ["EXT_meshopt_compression", "KHR_meshopt_compression"];
+    j.buffers.push({ byteLength: 64, uri: "data:application/octet-stream;base64," + btoa("\0".repeat(64)) });
+    j.buffers.push({ byteLength: 64, extensions: { EXT_meshopt_compression: { fallback: true } } });
+    j.bufferViews.push({ buffer: 2, byteLength: 48, extensions: { KHR_meshopt_compression: { buffer: 1, byteLength: 32, byteStride: 12, count: 4, mode: "ATTRIBUTES" } } });
+    rejects(makeGlb(j, bin), /buffer 2 is a EXT_meshopt_compression fallback buffer, so only bufferViews with EXT_meshopt_compression may reference it/, "EXT fallback buffer under a KHR bufferView");
+  }
+}
+
 // ---- JSON structure types ----
 rejects(withJson((j) => { j.nodes[0].children = 1; }), /node 0: children must be an array/, "children is a number");
 rejects(withJson((j) => { j.nodes[0].children = "1"; }), /node 0: children must be an array/, "children is a string");
