@@ -83,7 +83,7 @@ USDZ には PNG と JPEG しか入れられないので、非同期版の関数�
 npx gltf2usd-js model.glb model.usdz
 ```
 
-出力のファイル名を `model.usda` にすると、USDA のテキストを書き出します。`.gltf` を入力にした場合、外部ファイルは入力ファイルと同じフォルダ（とその下）からだけ読みます。警告は標準エラーに出ます。パッケージをインストールしたあとは、`glb2usd` というコマンド名で使えます。
+出力のファイル名を `model.usda` にすると、USDA のテキストを書き出します。`.gltf` を入力にした場合、外部ファイルは入力ファイルと同じフォルダ（とその下）からだけ読みます。警告は標準エラーに出ます。パッケージをインストールしたあとは、`glb2usd` というコマンド名で使えます。`--double-sided-faces` を付けると `doubleSided: "faces"` オプションになります。
 
 ## API
 
@@ -108,6 +108,7 @@ npx gltf2usd-js model.glb model.usdz
 | `onWarning(message)` | — | 変換できなかった glTF のデータ（未対応の拡張・プリミティブのモード・2 本目以降のアニメーションなど）について、種類ごとに 1 回呼ばれる |
 | `animation` | `0` | 変換する glTF アニメーションの番号か名前。USD のステージにはタイムラインが 1 本しかないので、書き出すアニメーションは 1 本だけ |
 | `animationMode` | `"skeleton"` | `"skeleton"` はノードアニメーションを剛体の UsdSkel スケルトンとして書く（AR Quick Look で再生できる）。`"xform"` は時間サンプル付きの `xformOp` として書く（AR Quick Look では再生されない） |
+| `doubleSided` | `"attribute"` | 両面表示のマテリアルの書き方。`"attribute"` は USD の `doubleSided` を書く（Quick Look と AR Quick Look は無視する）。`"faces"` は代わりに各三角形を裏返したコピーを足す（法線は面の角ごとになり、裏面では反転）ので、裏側もそこで描かれる。そのメッシュの面数は 2 倍になる |
 | `instancing` | `true` | 複数のノードが使うメッシュを 1 回だけ書き、instanceable な参照にする。`false` にすると複製する |
 | `texturePrefix` | `"textures/"` | 同梱するテクスチャのフォルダ |
 | `layerName` | `"model.usda"` | USDZ の中のルートレイヤーのファイル名 |
@@ -187,7 +188,7 @@ const usdz: Uint8Array = toUsdz(bytes, options);
 
 - **頂点カラーの RGB とマテリアル:** マテリアルのあるメッシュでは、頂点カラーの RGB を `displayColor` として書きますが、マテリアルの色には掛けません。
 - **頂点アルファとベースカラーテクスチャ:** 頂点アルファとベースカラーテクスチャのアルファは掛け合わせず、テクスチャのアルファを使います。UsdPreviewSurface では 2 つの入力を掛け合わせられないためです。ただし、アルファのないベースカラーテクスチャ（JPEG、またはアルファも `tRNS` もない PNG）は glTF ではアルファ 1 なので、不透明度はテクスチャではなく `baseColorFactor` と頂点アルファから取ります。
-- **両面表示のマテリアル:** `doubleSided` は USD の `doubleSided` として書きますが、Quick Look と AR Quick Look はこれを無視して表面だけを描くため、裏から見える面は消えます（警告を出します）。
+- **両面表示のマテリアル:** `doubleSided` は USD の `doubleSided` として書きますが、Quick Look と AR Quick Look はこれを無視して表面だけを描くため、裏から見える面は消えます（警告を出します）。オプション `doubleSided: "faces"`（CLI では `--double-sided-faces`）を指定すると、代わりに裏面を書きます。その場合、モーフターゲットの法線の差分は適用されず（UsdSkel は点ごとの法線にしか適用しない）、マテリアルバリアントによって両面かどうかが違うメッシュはどのバリアントでも裏面を持ちます（どちらも警告を出します）。この裏面が Quick Look で表示されるかは、まだ実機で確認していません。
 - **プリミティブのモード:** POINTS / LINES のプリミティブは、警告を出して飛ばします。
 - **アニメーション:** 変換するのは 1 本だけで、`options.animation` で選びます。
 - **シーン:** 変換するのは既定のシーン（`scene`、なければ最初のシーン）だけです。ほかのシーンがあれば警告を出します。

@@ -35,7 +35,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
 | `src/index.d.ts` | 公開 API の型定義（手書き） | `src/index.js` の export を変えたら必ず合わせる。export 名の一致は `test/run.js`、型は `npm run test:types`（`test/types.ts`） |
 | `src/index.js`| `toUsda()`, `toUsdz()`, `toUsdaAsync()`, `toUsdzAsync()`, `gltfToUsda()` | 公開 API。GLB と `.gltf` を受け付ける。旧名 `glbToUsda` などは同じ関数の別名（設計判断 24）。Async 版は WebP などの画像を変換してから変換する |
 | `cli.js`      | `node cli.js in.glb\|in.gltf out.usdz\|out.usda`（`--help` / `--version`） | `.gltf` の外部ファイルは同じフォルダ以下からのみ読む。npm の bin は `glb2usd` |
-| `test/cube-glb.js` | テスト用 GLB をメモリ上で生成（Node / ブラウザ共用） | `buildCubeGlb()`（段階 1）、`buildFeatureGlb()`（段階 2）、`buildAnimatedGlb()`（段階 3）、`buildSkinnedGlb()`（段階 4）、`buildCubeGltf()` |
+| `test/cube-glb.js` | テスト用 GLB をメモリ上で生成（Node / ブラウザ共用） | `buildCubeGlb()`（段階 1）、`buildFeatureGlb()`（段階 2）、`buildAnimatedGlb()`（段階 3）、`buildSkinnedGlb()`（段階 4）、`buildDoubleSidedGlb()`（両面マテリアル、issue #20）、`buildCubeGltf()` |
 | `test/make-glb.js` | 上記を `test/*.glb` と `test/gltf/`（外部ファイル付き .gltf）に書き出す | |
 | `test/png.js` | テスト画像用の小さな PNG エンコーダ | |
 | `test/meshopt-vectors.js` | meshopt のテストベクトル（meshoptimizer のエンコーダで生成した入力とリファレンス出力） | 依存なしでデコーダを検証するため |
@@ -71,6 +71,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
   `app.js` の `fixTextureTransforms()` で仕様どおりの行列に直してから左側に表示している
 - **新しい USD 機能を出力したら、`usd-preview.js` / `checks.js` もそれを読めるように更新する**
   （`UsdTransform2d`、`primvars:st1..3`、internal reference、xformOp の timeSamples、UsdSkel は対応済み）
+- 「両面を裏面の面で書く」のチェックで `doubleSided: "faces"` にして今の入力を変換し直す（サンプル「両面マテリアル」で左右を比べる）
 - variantSet があると選択 UI が出る。右は選択した variant の opinion を合成して再構築、左は GLTFLoader の parser で
   KHR_materials_variants の対応どおりにマテリアルを差し替える（option の順 = default + glTF の順）
 - UsdLux は DirectionalLight / PointLight / SpotLight（−Z 向き、強さはそのまま）で表示
@@ -131,7 +132,7 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
 
 ### 未対応（既知）
 - マテリアルがあるメッシュの頂点カラー RGB（`displayColor` は書くがマテリアルに掛けない。glTF は baseColor に掛ける）
-- Quick Look での両面表示（`doubleSided` は書くが Quick Look は無視する。警告。設計判断 27）
+- Quick Look での両面表示（既定では `doubleSided` を書くが Quick Look は無視する。警告。`doubleSided: "faces"` で裏面を書けるが実機未確認。設計判断 27）
 - 頂点アルファ × baseColorTexture のアルファ（UsdPreviewSurface では掛けられない。テクスチャのアルファを使い警告。テクスチャにアルファチャンネルがなければ掛け算は不要なので正確に表せる。設計判断 26）
 - ZIP64（4 GiB を超える USDZ は `UsdzLimitError`）
 - KHR_materials_volume / specular / sheen など（警告）
@@ -364,8 +365,17 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
    （この修正だけではラベル板は出なかった）。Quick Look がアルファのない画像の `a` を 0 と読むかは未確認。
 27. **doubleSided は USD の `doubleSided` に書き、Quick Look では効かないと警告する。** Mac の Finder の Quick Look は `doubleSided = 1` を無視して
    表面だけを描く（ユーザー確認: MeshoptCubeTest のラベル板は表面が −Z 向きで、そのままでは消え、面の向きと法線だけを +Z に反転すると表示された）。
-   裏面を複製して書く案（primvar・スキン・モーフも複製が要る）は、ユーザーの判断でいったん見送り。必要ならオプションにする。
    警告は文言が同じなので変換ごとに 1 回（`ctx.warn` の重複排除）。Khronos の結合テストでは 3 モデルで出る。
+   **issue #20: オプション `doubleSided: "faces"`（CLI `--double-sided-faces`）で裏面を書く。既定は従来どおり `"attribute"`**（ユーザーの判断。
+   面数が倍になり、doubleSided を尊重するビューアとの兼ね合いもあるため）。方式もユーザーの選択で「点は共有、法線だけ faceVarying」:
+   `faceVertexIndices` の後ろに各三角形を (a, c, b) で足し、法線は面の角ごと（NORMAL があれば点の法線を角に展開、なければ flat）で、
+   裏面の角は表の同じ角の法線を反転。点と点ごとの primvar（UV・色・displayOpacity・vertexAlphaUV・スキン・BlendShape の offsets）は
+   複製しない。`doubleSided` 属性は書かない（尊重するビューアが両方の面を描いて重なるため）し、Quick Look の警告も出さない。
+   **BlendShape の normalOffsets は faceVarying の法線には効かない**（OpenUSD 26.11 の `UsdSkel.BakeSkinning` で確認。vertex なら効く）ので、
+   NORMAL の差分を持つ morph target があれば警告する。面は形状なので variant ごとに変えられない: バインドされうるマテリアル
+   （`primitiveMaterials()`、自前のマテリアルがなければ既定マテリアル = 片面を含む）のどれかが両面なら裏面を書き、全部でなければ警告。
+   既定の出力はバイト単位で変わらない（fixtures で確認）。`test/double-sided.js`。**Quick Look で実際に裏面が見えるかは未確認**
+   （MeshoptCubeTest を `--double-sided-faces` で変換して確かめる）。
 
 ## OpenUSD バリデータに指摘されて直した点（再発注意）
 

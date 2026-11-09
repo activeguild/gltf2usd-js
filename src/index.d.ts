@@ -95,6 +95,11 @@ export interface StageOptions {
   animation?: number | string;
   /** `"skeleton"` (default): node animation as a rigid UsdSkel skeleton. `"xform"`: time-sampled xformOps. */
   animationMode?: "skeleton" | "xform";
+  /**
+   * Double-sided materials. `"attribute"` (default): USD `doubleSided`, which Quick Look ignores.
+   * `"faces"`: a reversed copy of each triangle, so Quick Look draws the back side too.
+   */
+  doubleSided?: "attribute" | "faces";
   /** Meshes used by several nodes become instanceable references. Default `true`. */
   instancing?: boolean;
   /** Folder of the packaged textures. Default `"textures/"`. */

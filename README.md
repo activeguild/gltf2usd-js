@@ -83,7 +83,7 @@ The async functions also convert WebP textures (`EXT_texture_webp`) to PNG or JP
 npx gltf2usd-js model.glb model.usdz
 ```
 
-Write `model.usda` as the output to get USDA text instead. For `.gltf` input, the external files are read from the input's folder (and below it only). Warnings go to stderr. Once the package is installed, the command is called `glb2usd`.
+Write `model.usda` as the output to get USDA text instead. For `.gltf` input, the external files are read from the input's folder (and below it only). Warnings go to stderr. Once the package is installed, the command is called `glb2usd`. `--double-sided-faces` sets the `doubleSided: "faces"` option.
 
 ## API
 
@@ -108,6 +108,7 @@ The original names `glbToUsdz`, `glbToUsda`, `glbToUsdzAsync` and `glbToUsdaAsyn
 | `onWarning(message)` | — | Called once for each kind of glTF data that could not be converted (unsupported extensions, primitive modes, extra animations, …) |
 | `animation` | `0` | Index or name of the glTF animation to convert. A USD stage has one timeline, so only one animation is written. |
 | `animationMode` | `"skeleton"` | `"skeleton"` writes node animation as a rigid UsdSkel skeleton, which AR Quick Look plays. `"xform"` writes time-sampled `xformOp`s instead, which AR Quick Look does not play. |
+| `doubleSided` | `"attribute"` | How double-sided materials are written. `"attribute"` writes USD `doubleSided`, which Quick Look and AR Quick Look ignore. `"faces"` adds a reversed copy of each triangle instead (normals become per face corner, negated on the back faces), so the back side is drawn there too; those meshes get twice the faces. |
 | `instancing` | `true` | A mesh used by several nodes is written once and referenced as an instanceable prim. `false` duplicates it. |
 | `texturePrefix` | `"textures/"` | Folder of the packaged textures |
 | `layerName` | `"model.usda"` | File name of the root layer inside the USDZ |
@@ -187,7 +188,7 @@ const usdz: Uint8Array = toUsdz(bytes, options);
 
 - **Vertex color RGB and materials:** On a mesh that has a material, the vertex color RGB is written as `displayColor` but is not multiplied into the material.
 - **Vertex alpha and base color textures:** Vertex alpha is not combined with a base color texture's alpha; the texture alpha is used. UsdPreviewSurface cannot multiply two inputs. A base color texture without an alpha channel (JPEG, or PNG without alpha or `tRNS`) has alpha 1 in glTF, so then the opacity comes from `baseColorFactor` and the vertex alpha instead of the texture.
-- **Double-sided materials:** `doubleSided` is written as USD `doubleSided`, but Quick Look and AR Quick Look ignore it and draw front faces only, so surfaces seen from behind disappear there (a warning is reported).
+- **Double-sided materials:** `doubleSided` is written as USD `doubleSided`, but Quick Look and AR Quick Look ignore it and draw front faces only, so surfaces seen from behind disappear there (a warning is reported). The option `doubleSided: "faces"` (CLI: `--double-sided-faces`) writes back faces instead. With it, morph target normal deltas are not applied (UsdSkel applies them to per-point normals only), and a mesh whose material variants differ in double-sidedness gets back faces under all of them (warnings are reported). Quick Look's display of these back faces has not been checked on a device yet.
 - **Transmission:** UsdPreviewSurface has no transmission or refraction, so transmissive materials are drawn as translucent instead. Fully transmissive glass keeps an opacity of 0.2 so that it stays visible. As in glTF, only the non-metallic part transmits (a fully metallic material stays opaque); the metallic channel of `metallicRoughnessTexture` is not taken into account (`metallicFactor` only). `transmissionTexture` is ignored, and so is transmission on MASK and unlit materials.
 - **Primitive modes:** POINTS and LINES primitives are skipped with a warning.
 - **Animations:** Only one animation is converted, chosen with `options.animation`.

@@ -30,6 +30,7 @@ const options: ConvertOptions = {
   animation: "Walk",
   animationMode: "xform",
   instancing: false,
+  doubleSided: "faces",
   texturePrefix: "tex/",
   layerName: "scene.usda",
   limits: { maxInputBytes: 1 << 20, maxNodeDepth: Infinity },
@@ -103,6 +104,8 @@ const variantContainer: Prim = root.variant("materialVariant", "default");
 // Misuse must not type-check.
 // @ts-expect-error animationMode is "skeleton" | "xform"
 glbToUsdz(bytes, { animationMode: "matrix" });
+// @ts-expect-error doubleSided is "attribute" | "faces"
+glbToUsdz(bytes, { doubleSided: true });
 // @ts-expect-error unknown limit
 glbToUsdz(bytes, { limits: { maxTriangles: 1 } });
 // @ts-expect-error numbers are not glTF input
