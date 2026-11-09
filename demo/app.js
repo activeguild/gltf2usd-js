@@ -400,7 +400,6 @@ function showGltf(glb, resources, stale) {
     new GLTFLoader(manager).setMeshoptDecoder(MeshoptDecoder).setDRACOLoader(dracoLoader()).parse(buf, "", (gltf) => {
       if (stale()) return resolve();
       lastGltf = gltf;
-      fixTextureTransforms(gltf.scene);
       setContent(views[0], gltf.scene);
       overlay("gltf", null);
       resolve();
@@ -416,31 +415,8 @@ function showGltf(glb, resources, stale) {
 let sharedDracoLoader = null;
 /** Google's Draco decoder (WASM, from the same three.js release) for the glTF view. */
 function dracoLoader() {
-  sharedDracoLoader ??= new DRACOLoader().setDecoderPath("https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/libs/draco/gltf/");
+  sharedDracoLoader ??= new DRACOLoader().setDecoderPath("https://cdn.jsdelivr.net/npm/three@0.187.0/examples/jsm/libs/draco/gltf/");
   return sharedDracoLoader;
-}
-
-/**
- * three.js' GLTFLoader maps KHR_texture_transform onto Texture.offset / repeat /
- * rotation, which three composes as uv' = S · R · uv + offset. The glTF spec is
- * uv' = T · R · S · uv, so the two differ when scale is non-uniform and rotation
- * is non-zero. Rebuild the matrix per spec so the reference view is correct.
- */
-function fixTextureTransforms(root) {
-  const seen = new Set();
-  root.traverse((o) => {
-    for (const m of [o.material].flat()) {
-      if (!m) continue;
-      for (const tex of Object.values(m)) {
-        if (!tex?.isTexture || seen.has(tex) || tex.rotation === 0) continue;
-        seen.add(tex);
-        const c = Math.cos(tex.rotation), s = Math.sin(tex.rotation);
-        const [sx, sy] = [tex.repeat.x, tex.repeat.y];
-        tex.matrixAutoUpdate = false;
-        tex.matrix.set(c * sx, s * sy, tex.offset.x, -s * sx, c * sy, tex.offset.y, 0, 0, 1);
-      }
-    }
-  });
 }
 
 // ---------- Rendering helpers ----------
