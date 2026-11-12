@@ -7,7 +7,10 @@ import { readFile, stat } from "node:fs/promises";
 import { extname, join, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const root = fileURLToPath(new URL("..", import.meta.url));
+// `node demo/server.js dist` serves the built site (scripts/build-site.js) instead.
+const root = process.argv[2]
+  ? fileURLToPath(new URL(`../${process.argv[2].replace(/[\\/]*$/, "/")}`, import.meta.url))
+  : fileURLToPath(new URL("..", import.meta.url));
 const port = Number(process.env.PORT) || 8080;
 const types = {
   ".html": "text/html; charset=utf-8",
@@ -21,6 +24,9 @@ const types = {
   ".jpg": "image/jpeg",
   ".webp": "image/webp",
   ".wasm": "application/wasm",
+  ".svg": "image/svg+xml",
+  ".txt": "text/plain; charset=utf-8",
+  ".xml": "application/xml",
 };
 
 createServer(async (req, res) => {

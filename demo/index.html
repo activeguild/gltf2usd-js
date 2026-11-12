@@ -3,7 +3,51 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>gltf2usd.js デモ</title>
+  <title>gltf2usd.js — glTF / GLB to USDZ converter in your browser | glTF・GLB → USDZ 変換デモ</title>
+  <meta name="description" content="Convert glTF / GLB to USDZ / USDA for Apple AR Quick Look, right in your browser — files never leave your device. Draco, meshopt, skinning, morph targets and animation supported. glTF / GLB をブラウザ内で USDZ に変換し、元のモデルと並べて確認できるデモ。">
+  <meta name="keywords" content="glTF to USDZ, GLB to USDZ, USDZ converter, USDA, AR Quick Look, OpenUSD, glTF 変換, USDZ 変換">
+  <meta name="robots" content="index, follow">
+  <meta name="theme-color" content="#2f6fdf">
+  <link rel="canonical" href="https://gltf2usd-js.vercel.app/demo/">
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="gltf2usd.js">
+  <meta property="og:title" content="gltf2usd.js — glTF / GLB to USDZ converter in your browser">
+  <meta property="og:description" content="Convert glTF / GLB to USDZ / USDA for Apple AR Quick Look, right in your browser. Compare the original and the converted model side by side.">
+  <meta property="og:url" content="https://gltf2usd-js.vercel.app/demo/">
+  <meta property="og:locale" content="ja_JP">
+  <meta property="og:locale:alternate" content="en_US">
+  <meta property="og:image" content="https://gltf2usd-js.vercel.app/demo/og-image.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="gltf2usd.js — glTF / GLB to USDZ converter in your browser">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="https://gltf2usd-js.vercel.app/demo/og-image.png">
+  <meta name="twitter:title" content="gltf2usd.js — glTF / GLB to USDZ converter in your browser">
+  <meta name="twitter:description" content="Convert glTF / GLB to USDZ / USDA for Apple AR Quick Look, right in your browser.">
+
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "gltf2usd.js demo",
+      "url": "https://gltf2usd-js.vercel.app/demo/",
+      "description": "Dependency-free glTF / GLB to USDZ / USDA converter that runs in the browser. Works with Apple AR Quick Look.",
+      "applicationCategory": "DeveloperApplication",
+      "operatingSystem": "Any (web browser)",
+      "inLanguage": ["ja", "en"],
+      "isAccessibleForFree": true,
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "license": "https://github.com/activeguild/gltf2usd-js/blob/main/LICENSE",
+      "codeRepository": "https://github.com/activeguild/gltf2usd-js",
+      "sameAs": [
+        "https://github.com/activeguild/gltf2usd-js",
+        "https://www.npmjs.com/package/gltf2usd-js"
+      ]
+    }
+  </script>
   <link rel="stylesheet" href="./style.css">
   <script type="importmap">
     {
@@ -20,6 +64,9 @@
       <h1>gltf2usd.js</h1>
       <p class="sub">glTF / GLB を USDZ / USDA に変換して、元の glTF と並べて確認するテストページ。変換はすべてブラウザ内で行い、ファイルはどこにも送信しません。</p>
     </div>
+    <a class="gh" href="https://github.com/activeguild/gltf2usd-js" target="_blank" rel="noopener" aria-label="GitHub リポジトリ" title="GitHub リポジトリ">
+      <svg viewBox="0 0 16 16" width="28" height="28" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+    </a>
   </header>
 
   <main>

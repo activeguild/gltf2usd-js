@@ -61,6 +61,8 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
   テクスチャ参照、UsdSkel: SkelBindingAPI / SkelRoot 配下 / ジョイント順 / jointIndices の範囲 / BlendShape の要素数）
 - `usdz-reader.js`: zip の central directory を読む
 - `server.js`: 依存ゼロの静的サーバ
+- **公開**: https://gltf2usd-js.vercel.app/demo/ （Vercel）。`vercel.json` の buildCommand で `scripts/build-site.js` が `dist/` にデモに必要なファイル（`demo/` の公開分・`src/*.js`・`test/cube-glb.js` / `png.js`・`site/` の robots.txt / sitemap.xml）だけをコピーして公開する（README / CLAUDE.md などを出さないため）。**デモが新しいファイルを import したら `build-site.js` の一覧にも足す**。確認は `npm run build:site && node demo/server.js dist`
+- SEO: `index.html` に description / canonical / OGP / Twitter Card / JSON-LD（WebApplication）。OGP 画像 `og-image.png`（1200×630）は `scripts/og-image.html` をヘッドレス Chrome で撮ったもの（コマンドはそのファイルの先頭）。ヘッダー右上に GitHub へのリンク
 - three.js（0.187.0）は import map で jsDelivr から読む。デモにだけ許される依存で、`src/` には入れない
 - 左の GLTFLoader には three.js の MeshoptDecoder と DRACOLoader（Google の WASM デコーダ、同じ three.js 0.187.0 の
   `examples/jsm/libs/draco/gltf/`）を渡している。右（変換結果）は `src/meshopt.js` / `src/draco.js` を使うので、左右の比較が検証になる

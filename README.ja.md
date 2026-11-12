@@ -234,7 +234,7 @@ cd gltf2usd-js
 npm run demo          # http://localhost:8080/demo/
 ```
 
-GLB をページにドロップすると、元の glTF（three.js）と変換した USD を並べて表示します。構造のチェック結果、USDA のテキスト、Prim ツリーも見られます。iPhone / iPad では、結果を AR Quick Look で開けます。デモは静的ファイルだけでできているので、Vercel や GitHub Pages などにそのまま置けます。three.js を使うのはデモだけで、ライブラリ本体には依存パッケージがありません。
+GLB をページにドロップすると、元の glTF（three.js）と変換した USD を並べて表示します。構造のチェック結果、USDA のテキスト、Prim ツリーも見られます。iPhone / iPad では、結果を AR Quick Look で開けます。デモは静的ファイルだけでできていて、https://gltf2usd-js.vercel.app/demo/ で公開しています。`npm run build:site` でデモに必要なファイルだけを `dist/` にコピーし、Vercel はそれを公開します（`vercel.json`）。同じフォルダをほかのホスティングに置くこともできます。three.js を使うのはデモだけで、ライブラリ本体には依存パッケージがありません。
 
 ## 開発
 

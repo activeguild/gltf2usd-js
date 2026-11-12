@@ -58,6 +58,7 @@
     "test": "node test/make-glb.js && node test/run.js && node test/validation.js && node test/accessor.js && node test/color.js && node test/usdz.js && node test/edge-cases.js && node test/images.js && node test/draco.js && node test/transmission.js && node test/double-sided.js",
     "test:types": "npx -y -p typescript@6.0.2 tsc -p test/tsconfig.json",
     "demo": "node demo/server.js",
+    "build:site": "node scripts/build-site.js",
     "test:integration": "node test/integration/run.js",
     "prepublishOnly": "npm test"
   }
