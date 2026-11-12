@@ -201,7 +201,7 @@ Everything that is dropped is reported through `onWarning`.
 
 - **Tested viewers:** iOS AR Quick Look and macOS Finder Quick Look play the output, including skins, node animation and vertex alpha. The layout follows Apple's own samples: the default prim is the `SkelRoot`, and each `SkelAnimation` sits under its `Skeleton`.
 - **xformOp animation:** AR Quick Look does not play time-sampled xformOps. That is why node animation is written as a skeleton by default.
-- **Zero scale:** Quick Look stops skinning a whole skeleton when a joint's scale is exactly 0, for example a flipbook that scales each frame from 0 to 1. All frames then show at once (or none do). OpenUSD and the demo play these files correctly.
+- **Zero scale:** Quick Look stops skinning a whole skeleton when a joint's scale is exactly 0, for example a flipbook that scales each frame from 0 to 1, or particles that grow from 0. Every other joint in that skeleton stops moving too. So joint scales in the UsdSkel output (rest pose and animation, node animation and glTF skins) are written as at least 1e-4 in magnitude, with a warning. A part at that scale is too small to see. `animationMode: "xform"` keeps exact zeros.
 - **Reality Converter:** It accepts only packages whose root layer is USDC. USDC output is not implemented yet.
 
 ## Input validation

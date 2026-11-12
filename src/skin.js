@@ -191,6 +191,22 @@ export function rigidPrimvars(plan, k, vertexCount) {
   return { indices: new Array(vertexCount).fill(k), weights: new Array(vertexCount).fill(1), elementSize: 1, geomBind: plan.bind[k] };
 }
 
+/**
+ * Smallest joint scale written to UsdSkel. Quick Look (Mac and iOS) ignores the whole
+ * skeleton — every joint, not only the one scaled to 0 — when any joint scale is exactly 0,
+ * so the meshes stay unskinned. 1e-4 is still a normal half (scales are half3; the smallest
+ * normal half is about 6.1e-5) and invisible at any practical size.
+ */
+export const MIN_JOINT_SCALE = 1e-4;
+
+/** Clamp |s| < MIN_JOINT_SCALE to ±MIN_JOINT_SCALE (0 becomes +), warning once per conversion. */
+function clampJointScale(ctx, s) {
+  if (s.every((x) => !(Math.abs(x) < MIN_JOINT_SCALE))) return s;
+  ctx.warn(`Joint scales smaller than ${MIN_JOINT_SCALE} were written as ${MIN_JOINT_SCALE} ` +
+    "(Quick Look ignores a skeleton that has a joint scale of 0)");
+  return s.map((x) => (Math.abs(x) < MIN_JOINT_SCALE ? (x < 0 ? -MIN_JOINT_SCALE : MIN_JOINT_SCALE) : x));
+}
+
 /** Joint-local (relative to parent joint) T / R / S at a time code (undefined = rest pose). */
 function jointLocal(ctx, plan, k, time) {
   const node = ctx.json.nodes[plan.joints[k]];
@@ -198,10 +214,11 @@ function jointLocal(ctx, plan, k, time) {
   const rest = node.matrix ? decompose(node.matrix) : null;
   const t = ch?.translation ? sampleAt(ch.translation, time, "translation") : rest?.t ?? node.translation ?? [0, 0, 0];
   const r = ch?.rotation ? sampleAt(ch.rotation, time, "rotation") : rest?.r ?? node.rotation ?? [0, 0, 0, 1];
-  const s = ch?.scale ? sampleAt(ch.scale, time, "scale") : rest?.s ?? node.scale ?? [1, 1, 1];
+  const s = clampJointScale(ctx, ch?.scale ? sampleAt(ch.scale, time, "scale") : rest?.s ?? node.scale ?? [1, 1, 1]);
   const prefix = plan.prefix[k];
   if (isIdentity(prefix)) return { t, r, s };
-  return decompose(multiply(prefix, composeTRS(t, r, s)));
+  const d = decompose(multiply(prefix, composeTRS(t, r, s)));
+  return { ...d, s: clampJointScale(ctx, d.s) };
 }
 
 /** A joint-less plan, for meshes that only have blend shapes. */

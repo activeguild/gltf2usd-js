@@ -230,7 +230,15 @@ CesiumMan / Fox / AnimatedMorphCube / MorphPrimitivesTest と、glTF-Draco 版�
    静止時のワールド行列が特異なジョイント（静止 scale 0 から拡大して見せるパラパラ漫画など）は、bindTransforms と geomBindTransform を
    単位行列にする（剛体バインドは inverse(bind) · geomBind = 単位 なら何でもよい）。行列のままだと geomBind で全頂点が 1 点に潰れ、
    inverse(bind) もないので、アニメーションで拡大しても表示されなかった（ユーザー提供の flipbook_scale_sample.glb。デモの右側も同じ）。
-   restTransforms は scale 0 のままなので、再生前は非表示。特異かどうかは `W · invert(W)` が単位行列か（`planRigidAnimation()`）で判定。
+   特異かどうかは `W · invert(W)` が単位行列か（`planRigidAnimation()`）で判定。
+   **ジョイントのスケールは絶対値 1e-4 以上にして書く（`MIN_JOINT_SCALE`、`skin.js` の `jointLocal()`）。** Quick Look（Mac / iOS）は
+   ジョイントのスケールがちょうど 0 だと、そのスケルトン全体のスキニングをやめる（他のジョイントも動かない）。ユーザー提供の 3.glb
+   （スノードーム。雪片 216 個が translation、煙 3 個が scale 0 → 拡大で、全部 1 つの Skeleton）で雪片が消えた。scale 0 を 1e-4 にした版だけが
+   Mac の Quick Look で全部再生され、煙のアニメーションを外した版では雪片は見えた（ユーザー確認）。この修正後の出力でも、Mac の Quick Look で
+   雪片と煙が両方動くことをユーザーが確認済み。flipbook_scale_sample.glb でも同じ。
+   restTransforms とアニメーションの scales（half3。正規化数の最小は約 6.1e-5）の両方、ノードアニメーションと glTF スキンの両方に適用し、
+   符号は保つ（0 は +）。警告は 1 回。`animationMode: "xform"` は変えない。OpenUSD での変形後の位置は変更前と同じ精度で glTF と一致。
+   Khronos では InterpolationTest（Step Scale）でだけ警告が出る。再生前は 1e-4 なので見えない。
 17. **スケルトンがあれば `/Root` 自体を SkelRoot にする。** 確認ビューアは **Mac の Finder の Quick Look（スペースキー）**。
    SkelRoot を `/Root`（Xform）の下に入れ子にした出力は USDA / USDC とも再生されず、defaultPrim が SkelRoot の構成だけ再生された
    （USDA でも再生される＝形式は無関係）。各スケルトンの入れ物は Xform、SkelAnimation は Skeleton の子、剛体バインドの

@@ -2,6 +2,7 @@
 // is refused (GltfValidationError) or skipped with a warning, never silently.
 import { glbToUsda, GltfValidationError } from "../src/index.js";
 import { makeGlb, packParts, triangleDoc, clone } from "./gltf-builder.js";
+import { buildSkinnedGlb } from "./cube-glb.js";
 
 let failures = 0;
 const assert = (c, m) => { if (!c) { console.error("FAIL:", m); failures++; } };
@@ -51,13 +52,40 @@ const xform = { animationMode: "xform" };
   // Flipbook: a node at rest scale 0 that an animation scales to 1 (skeleton mode). Its rest
   // world matrix is singular, so it cannot be the rigid bind (inverse(bind) · geomBind would
   // collapse every point and the frame would never appear); the bind is the identity instead.
-  const zero = "( (0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 1) )";
+  // Quick Look ignores the whole skeleton when a joint scale is exactly 0, so joint scales are
+  // written as at least 1e-4 (rest and samples), with one warning; the frame is still hidden at rest.
+  const tiny = "( (0.0001, 0, 0, 0), (0, 0.0001, 0, 0), (0, 0, 0.0001, 0), (0, 0, 0, 1) )";
   const identity = "( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1) )";
   const { usda, warnings } = run(animated([0, 1], [0, 0, 0, 1, 1, 1], { interpolation: "STEP", path: "scale", node: { scale: [0, 0, 0] } }));
   assert(usda.includes(`uniform matrix4d[] bindTransforms = [${identity}]`), `singular rest: identity bind: ${usda.match(/bindTransforms = .*/)?.[0]}`);
   assert(usda.includes(`matrix4d primvars:skel:geomBindTransform = ${identity}`), `singular rest: identity geomBind: ${usda.match(/geomBindTransform = .*/)?.[0]}`);
-  assert(usda.includes(`uniform matrix4d[] restTransforms = [${zero}]`), "singular rest: the rest pose stays scale 0 (hidden until played)");
-  assert(!warnings.length, `singular rest warnings: ${warnings}`);
+  assert(usda.includes(`uniform matrix4d[] restTransforms = [${tiny}]`), `singular rest: rest scale 1e-4: ${usda.match(/restTransforms = .*/)?.[0]}`);
+  const s = samplesOf(usda, "scales");
+  assert(s && Object.values(s).every((v) => !v.includes("(0, 0, 0)")) && Object.values(s).includes("[(0.0001, 0.0001, 0.0001)]"),
+    `singular rest: no scale 0 in samples: ${JSON.stringify(s)}`);
+  assert(warnings.length === 1 && /Joint scales smaller than 0\.0001/.test(warnings[0]), `singular rest warnings: ${warnings}`);
+  // xform mode keeps scale 0 (only UsdSkel output is clamped).
+  const x = run(animated([0, 1], [0, 0, 0, 1, 1, 1], { path: "scale", node: { scale: [0, 0, 0] } }), xform);
+  assert(samplesOf(x.usda, "xformOp:scale")?.[0] === "(0, 0, 0)" && !x.warnings.length, `xform keeps scale 0: ${x.warnings}`);
+}
+{
+  // A negative tiny scale keeps its sign; normal scales are untouched (no warning).
+  const { usda, warnings } = run(animated([0, 1], [-1e-6, 1, 1, 1, 1, 1], { path: "scale" }));
+  assert(samplesOf(usda, "scales")?.[0] === "[(-0.0001, 1, 1)]", `negative tiny scale: ${JSON.stringify(samplesOf(usda, "scales"))}`);
+  assert(warnings.length === 1, `negative tiny scale warnings: ${warnings}`);
+  assert(!run(animated([0, 1], [1, 1, 1, 2, 2, 2], { path: "scale" })).warnings.length, "regular scale: no warning");
+}
+{
+  // glTF skins are clamped too: a skin joint at rest scale 0.
+  const glb = buildSkinnedGlb();
+  const n = new DataView(glb.buffer, glb.byteOffset).getUint32(12, true);
+  const json = JSON.parse(new TextDecoder().decode(glb.subarray(20, 20 + n)));
+  const bin = glb.subarray(20 + n + 8);
+  json.nodes.find((nd) => nd.name === "Upper").scale = [0, 0, 0];
+  const { usda, warnings } = run(makeGlb(json, bin));
+  const rest = usda.match(/restTransforms = .*/)?.[0] ?? "";
+  assert(rest.includes("(0.0001, 0, 0, 0)") && !rest.includes("(0, 0, 0, 0)"), `skin joint scale 0: ${rest}`);
+  assert(warnings.some((w) => /Joint scales smaller/.test(w)), `skin joint scale 0 warnings: ${warnings}`);
 }
 {
   // A regular animated node keeps its rest world matrix as bind and geomBind.
