@@ -1,0 +1,51 @@
+<!doctype html>
+<!--
+  Source of demo/og-image.png (1200 x 630). Regenerate with:
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless --disable-gpu --hide-scrollbars \
+    --window-size=1200,630 --screenshot=demo/og-image.png scripts/og-image.html
+-->
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; width: 1200px; height: 630px; overflow: hidden; }
+  body {
+    background: radial-gradient(circle at 85% 20%, #22324f 0%, #111418 55%);
+    color: #e6e9ee;
+    font-family: -apple-system, "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+    display: flex; flex-direction: column; justify-content: space-between;
+    padding: 72px 80px; box-sizing: border-box;
+  }
+  .brand { display: flex; align-items: center; gap: 20px; font-size: 64px; font-weight: 800; letter-spacing: -1px; }
+  .brand svg { width: 76px; height: 76px; }
+  h1 { margin: 36px 0 0; font-size: 46px; line-height: 1.25; font-weight: 700; }
+  .ja { margin: 14px 0 0; font-size: 30px; color: #9aa3ae; font-weight: 500; }
+  .flow { display: flex; align-items: center; gap: 22px; margin-top: 8px; }
+  .chip { font: 700 30px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 12px 26px; border-radius: 14px; border: 2px solid #333a44; background: #1a1e24; }
+  .chip.out { border-color: #5b8ff0; color: #8fb2f5; }
+  .arrow { font-size: 36px; color: #5b8ff0; }
+  .foot { width: 100%; gap: 24px; display: flex; justify-content: space-between; align-items: flex-end; font-size: 24px; color: #9aa3ae; }
+  .foot span { white-space: nowrap; }
+  .foot b { color: #e6e9ee; font-weight: 600; }
+</style>
+</head>
+<body>
+  <div>
+    <div class="brand">
+      <svg viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#2f6fdf"/><path d="M16 6 25 11v10l-9 5-9-5V11z" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/><path d="M7 11l9 5 9-5M16 16v10" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg>
+      gltf2usd.js
+    </div>
+    <h1>glTF / GLB to USDZ converter<br>in your browser</h1>
+    <p class="ja">ブラウザだけで glTF・GLB を USDZ に変換 — AR Quick Look 対応</p>
+  </div>
+  <div class="flow">
+    <span class="chip">.glb</span><span class="chip">.gltf</span>
+    <span class="arrow">→</span>
+    <span class="chip out">.usdz</span><span class="chip out">.usda</span>
+  </div>
+  <div class="foot">
+    <span><b>gltf2usd-js.vercel.app</b>/demo</span>
+    <span>Zero dependencies · Draco · meshopt · Animation</span>
+  </div>
+</body>
+</html>

@@ -9,3 +9,4 @@ test/double-sided.glb
 !test/fixtures/*
 test/gltf/
 test/.cache/
+dist/

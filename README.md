@@ -234,7 +234,7 @@ cd gltf2usd-js
 npm run demo          # http://localhost:8080/demo/
 ```
 
-Drop a GLB onto the page to see the original glTF (three.js) and the converted USD side by side, together with structural checks, the USDA text and the prim tree. On iPhone and iPad, the result opens in AR Quick Look. The demo is static files only and deploys as-is, for example to Vercel or GitHub Pages. three.js is used by the demo only; the library itself has no dependencies.
+Drop a GLB onto the page to see the original glTF (three.js) and the converted USD side by side, together with structural checks, the USDA text and the prim tree. On iPhone and iPad, the result opens in AR Quick Look. The demo is static files only and runs live at https://gltf2usd-js.vercel.app/demo/. `npm run build:site` copies just the files the demo needs into `dist/`; that is what Vercel publishes (`vercel.json`), and you can host the same folder anywhere. three.js is used by the demo only; the library itself has no dependencies.
 
 ## Development
 
