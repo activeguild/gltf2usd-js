@@ -76,7 +76,13 @@ function applyWireframe() {
 
 function frameCamera() {
   const box = new THREE.Box3();
-  for (const v of views) if (v.content) box.expandByObject(v.content);
+  for (const v of views) {
+    if (!v.content) continue;
+    // Bones must have current world matrices: a SkinnedMesh's bounds are bone.matrixWorld · boneInverse · v,
+    // and with stale (identity) bones a joint scaled 1e-4 at rest blows the box up 1e4 times.
+    v.content.updateMatrixWorld(true);
+    box.expandByObject(v.content);
+  }
   if (box.isEmpty()) return;
   const size = box.getSize(new THREE.Vector3()).length() || 1;
   box.getCenter(target);
